@@ -1,0 +1,82 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Nutanix STIG Control Center Supervisor</title>
+  <link rel="stylesheet" href="/app.css">
+  <script src="/app.js" defer></script>
+</head>
+<body>
+  <main>
+    <header>
+      <div>
+        <p class="eyebrow">Local workstation control</p>
+        <h1>Nutanix STIG Control Center</h1>
+        <p class="lede">Start, stop, repair, and open the hardening interface without returning to a command prompt.</p>
+      </div>
+      <div class="status-card" aria-live="polite">
+        <span>Control Center status</span>
+        <strong id="status-pill" data-state="Stopped">Stopped</strong>
+        <small id="status-detail">Checking the local service…</small>
+      </div>
+    </header>
+
+    <section class="notice-card">
+      <strong>One setup action per workstation</strong>
+      <p>A webpage cannot exist before a local process starts. Run the operating-system installer once; after that, this fixed localhost page provides routine controls.</p>
+    </section>
+
+    <section class="control-card" aria-labelledby="controls-title">
+      <div class="section-heading">
+        <div>
+          <p class="eyebrow">Supervisor</p>
+          <h2 id="controls-title">Application controls</h2>
+        </div>
+        <p id="registration-status">Checking automatic-start registration…</p>
+      </div>
+
+      <div class="button-grid">
+        <button id="install-button" type="button">Install dependencies</button>
+        <button id="repair-button" class="secondary" type="button">Repair dependencies</button>
+        <button id="start-button" type="button">Start</button>
+        <button id="stop-button" class="secondary" type="button">Stop</button>
+        <button id="restart-button" class="secondary" type="button">Restart</button>
+        <button id="open-button" class="open" type="button">Open Control Center</button>
+      </div>
+
+      <div class="facts">
+        <div><span>Dependencies</span><strong id="dependency-status">Checking…</strong></div>
+        <div><span>Active cluster</span><strong id="cluster-status">None</strong></div>
+        <div><span>Operation</span><strong id="operation-status">Idle</strong></div>
+      </div>
+    </section>
+
+    <section id="job-card" class="job-card hidden" aria-live="polite">
+      <div class="job-heading">
+        <div>
+          <p class="eyebrow">Current action</p>
+          <h2 id="job-title">Working…</h2>
+        </div>
+        <span id="job-state">Queued</span>
+      </div>
+      <div class="progress"><i id="progress-bar"></i></div>
+      <pre id="job-progress"></pre>
+      <p id="job-result"></p>
+    </section>
+
+    <section class="uninstall-card">
+      <div>
+        <h2>Remove automatic startup</h2>
+        <p>Uninstall stops the Control Center and removes this supervisor from login startup. Evidence, settings, host trust, and the private runtime are preserved.</p>
+      </div>
+      <button id="uninstall-button" class="danger" type="button">Uninstall supervisor</button>
+    </section>
+
+    <footer>
+      <span id="version">Nutanix STIG Control Center</span>
+      <span>Bound only to 127.0.0.1:8765</span>
+    </footer>
+  </main>
+</body>
+</html>

@@ -2,15 +2,14 @@
 
 ## Client installation and execution guide
 
-Version 1.1.0 — July 23, 2026
+Version 1.2.0 — July 24, 2026
 
 ## Purpose
 
 The Universal Edition provides the complete local Nutanix STIG assessment,
-hardening, verification, rollback, and reporting interface without requiring a
-third-party launcher. The
-same package runs on Windows, macOS, and Linux through a standard Python 3.10+
-runtime.
+hardening, verification, rollback, and reporting interface. The same package
+runs on Windows, macOS, and Linux through a standard Python 3.10+ runtime and a
+small always-on localhost supervisor.
 
 The application must run on an authorized administrative workstation that can
 reach the selected cluster CVM virtual IP. It does not run in a public cloud or
@@ -34,27 +33,28 @@ on a remotely accessible web server.
 - Internet/internal package repository access during first installation, or a
   prepared platform-compatible `wheelhouse`.
 
-## Install and start
+## Install once
 
 ### Windows
 
 1. Verify the delivered package SHA-256.
 2. Extract the complete package into a protected user-controlled folder.
-3. Double-click `Start-Control-Center.cmd`.
-4. On first start, wait while the private Python environment is created and the
-   pinned dependencies are installed.
-5. The default browser opens to a randomized localhost port.
-
-To install before the maintenance window, run
-`Install-Control-Center.cmd`, followed later by `Start-Control-Center.cmd`.
+3. Double-click `Install-Control-Center.cmd`.
+4. Approve the one-time Windows UAC prompt. Windows requires administrator
+   approval to register the login task; the resulting task and application run
+   with limited user privileges.
+5. Wait while the private Python environment is created, pinned dependencies
+   are installed, and a per-user Scheduled Task is registered.
+6. The browser opens to `http://127.0.0.1:8765`.
 
 ### macOS
 
 1. Verify the package SHA-256 and extract it.
-2. Double-click `Start-Control-Center.command`.
+2. Double-click `Install-Control-Center.command`.
 3. If Gatekeeper blocks the downloaded script, right-click it and select
    **Open**. If executable permissions were not retained by the archive tool,
-   run `chmod +x *.command *.sh` once.
+   run `chmod +x Install-Control-Center.command install.sh` once.
+4. The installer registers a launchd user agent and opens the supervisor.
 
 ### Linux
 
@@ -62,22 +62,33 @@ To install before the maintenance window, run
 2. Run:
 
    ```bash
-   chmod +x *.sh
-   ./start.sh
+   chmod +x install.sh
+   ./install.sh
    ```
+3. The installer registers a `systemd --user` service and opens the
+   supervisor.
 
 The application creates `.runtime/venv` inside its extracted folder. No global
 Python packages are installed.
 
+True zero-click installation is not possible because a webpage cannot appear
+until a local process serves it. The installer is the one initial double-click
+or launch required on each workstation. All routine actions after installation
+are available in the supervisor page.
+
 ## Pre-maintenance validation
 
-Run the Status or diagnostic action:
+Open `http://127.0.0.1:8765` and confirm:
 
-- Windows: `Status-Control-Center.cmd`
-- Any OS: `python3 control_center.py doctor`
+- the status pill reads **Stopped** or **Running**, not **Error**;
+- dependencies read **Ready**;
+- automatic login start is registered;
+- no cluster operation is currently active.
 
 Diagnostics validate the local installation and service only. They do not
-contact a Nutanix cluster.
+contact a Nutanix cluster. The advanced command
+`python3 control_center.py doctor` provides the same local-only diagnostic
+detail.
 
 ## Cluster workflow
 
@@ -175,36 +186,28 @@ Track the remaining controls, owner, evidence reference, and status in the
 Audit page. Download final evidence, then use **Close workspace** before
 selecting another cluster. Closing preserves prior evidence.
 
-## Stop, restart, status, and repair
+## Start, stop, restart, status, repair, and uninstall
 
-### Windows
+Use only the supervisor page at `http://127.0.0.1:8765` for routine lifecycle
+actions:
 
-- Stop: `Stop-Control-Center.cmd`
-- Status: `Status-Control-Center.cmd`
-- Repair: `Repair-Control-Center.cmd`
+- **Install dependencies** verifies or installs the pinned private environment.
+- **Start** launches the separate Control Center service.
+- **Stop** stops only the verified Control Center process.
+- **Restart** performs the verified stop/start sequence.
+- **Open Control Center** opens the currently verified application URL.
+- **Repair dependencies** stops the application and rebuilds
+  `.runtime/venv`, with progress shown in the page.
+- **Uninstall supervisor** removes the OS login registration and stops the
+  application while preserving `.runtime` and `app/data`.
 
-### macOS
+The status page polls every few seconds and does not require a page reload.
+Stop, Restart, Repair, and Uninstall refuse to interrupt an active cluster
+operation.
 
-- Stop: `Stop-Control-Center.command`
-- Start/open again: `Start-Control-Center.command`
-
-### Linux
-
-- Stop: `./stop.sh`
-- Status: `./status.sh`
-- Start/open again: `./start.sh`
-
-The common controller also supports:
-
-```text
-python3 control_center.py start|stop|restart|open|status|doctor|repair
-```
-
-Repair rebuilds `.runtime/venv` only. It preserves `app/data`.
-
-Normal Stop and Repair refuse to interrupt an active cluster operation. The
-command-line `stop --force-stop` option is reserved for an authorized emergency
-because interrupting a change can leave partial remote state.
+The command-line `stop --force-stop` option remains available only for an
+authorized emergency because interrupting a change can leave partial remote
+state.
 
 ## Data and evidence
 
@@ -224,6 +227,12 @@ The service log is:
 The controller's non-secret local process record is:
 
 `.runtime/service.json`
+
+Supervisor state and registration records are:
+
+- `.runtime/supervisor.json`
+- `.runtime/supervisor-registration.json`
+- `.runtime/supervisor.log`
 
 ## What the program automates
 

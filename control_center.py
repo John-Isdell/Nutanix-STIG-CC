@@ -19,11 +19,14 @@ import webbrowser
 from contextlib import contextmanager
 from datetime import datetime, timezone
 from pathlib import Path
+from typing import Callable
 from urllib.error import URLError
 from urllib.request import Request, urlopen
 
+import supervisor_setup
 
-VERSION = "1.1.0"
+
+VERSION = "1.2.0"
 ROOT = Path(__file__).resolve().parent
 APP_DIR = ROOT / "app"
 RUNTIME_DIR = ROOT / ".runtime"
@@ -35,6 +38,7 @@ LOG_FILE = DATA_DIR / "control-center-service.log"
 REQUIREMENTS = APP_DIR / "requirements.txt"
 SERVER = APP_DIR / "server.py"
 MIN_PYTHON = (3, 10)
+Progress = Callable[[str], None] | None
 
 
 class ControlCenterError(RuntimeError):
@@ -43,6 +47,13 @@ class ControlCenterError(RuntimeError):
 
 def now() -> str:
     return datetime.now(timezone.utc).isoformat(timespec="seconds")
+
+
+def emit(message: str, progress: Progress = None) -> None:
+    if progress:
+        progress(message)
+    else:
+        print(message)
 
 
 def ensure_supported_python() -> None:
@@ -143,13 +154,35 @@ def controller_lock():
             pass
 
 
-def run_checked(command: list[str], label: str) -> None:
+def run_checked(
+    command: list[str],
+    label: str,
+    progress: Progress = None,
+) -> None:
     try:
-        result = subprocess.run(command, cwd=ROOT, check=False)
+        if progress:
+            process = subprocess.Popen(
+                command,
+                cwd=ROOT,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.STDOUT,
+                text=True,
+                errors="replace",
+                bufsize=1,
+            )
+            assert process.stdout is not None
+            for line in process.stdout:
+                text = line.rstrip()
+                if text:
+                    emit(text, progress)
+            returncode = process.wait()
+        else:
+            result = subprocess.run(command, cwd=ROOT, check=False)
+            returncode = result.returncode
     except OSError as exc:
         raise ControlCenterError(f"{label} could not start: {exc}") from exc
-    if result.returncode:
-        raise ControlCenterError(f"{label} failed with exit code {result.returncode}.")
+    if returncode:
+        raise ControlCenterError(f"{label} failed with exit code {returncode}.")
 
 
 def dependencies_work() -> bool:
@@ -170,14 +203,17 @@ def dependencies_work() -> bool:
     return check.returncode == 0
 
 
-def install_dependencies(repair: bool = False) -> None:
+def install_dependencies(
+    repair: bool = False,
+    progress: Progress = None,
+) -> None:
     ensure_supported_python()
     ensure_layout()
     if repair:
         expected_parent = RUNTIME_DIR.resolve()
         if VENV_DIR.exists() and VENV_DIR.resolve().parent != expected_parent:
             raise ControlCenterError("Refusing to repair an unexpected runtime path.")
-        print("Rebuilding the isolated application environment…")
+        emit("Rebuilding the isolated application environment…", progress)
         builder = venv.EnvBuilder(with_pip=True, clear=True)
         try:
             builder.create(VENV_DIR)
@@ -187,7 +223,7 @@ def install_dependencies(repair: bool = False) -> None:
                 "On Debian/Ubuntu, confirm the python3-venv package is installed."
             ) from exc
     elif not runtime_python().is_file():
-        print("Creating the isolated application environment…")
+        emit("Creating the isolated application environment…", progress)
         builder = venv.EnvBuilder(with_pip=True)
         try:
             builder.create(VENV_DIR)
@@ -214,13 +250,16 @@ def install_dependencies(repair: bool = False) -> None:
     wheelhouse = ROOT / "wheelhouse"
     if wheelhouse.is_dir() and any(wheelhouse.iterdir()):
         command.extend(["--no-index", "--find-links", str(wheelhouse)])
-        print("Installing from the local wheelhouse…")
+        emit("Installing from the local wheelhouse…", progress)
     else:
-        print("Installing the pinned application dependencies…")
-    run_checked(command, "Dependency installation")
+        emit("Installing the pinned application dependencies…", progress)
+    run_checked(command, "Dependency installation", progress)
     if not dependencies_work():
         raise ControlCenterError("The isolated environment did not pass its import check.")
-    print("Installation complete. Cluster evidence and settings were not changed.")
+    emit(
+        "Installation complete. Cluster evidence and settings were not changed.",
+        progress,
+    )
 
 
 def health(state: dict, timeout: float = 1.0) -> dict | None:
@@ -286,18 +325,21 @@ def terminate_pid(pid: int, force: bool = False) -> None:
             pass
 
 
-def start_service(open_browser: bool = True) -> dict:
+def start_service(
+    open_browser: bool = True,
+    progress: Progress = None,
+) -> dict:
     ensure_supported_python()
     ensure_layout()
     existing, _ = running_state()
     if existing:
-        print(f"Control Center is already running at {existing['url']}")
+        emit(f"Control Center is already running at {existing['url']}", progress)
         if open_browser:
             webbrowser.open(existing["url"], new=2)
         return existing
 
     if not dependencies_work():
-        install_dependencies()
+        install_dependencies(progress=progress)
 
     port = choose_port()
     instance_id = uuid.uuid4().hex
@@ -348,7 +390,7 @@ def start_service(open_browser: bool = True) -> dict:
     deadline = time.monotonic() + 25
     while time.monotonic() < deadline:
         if health(state, timeout=0.5):
-            print(f"Control Center is running at {url}")
+            emit(f"Control Center is running at {url}", progress)
             if open_browser:
                 webbrowser.open(url, new=2)
             return state
@@ -367,11 +409,14 @@ def start_service(open_browser: bool = True) -> dict:
     )
 
 
-def stop_service(force_stop: bool = False) -> None:
+def stop_service(
+    force_stop: bool = False,
+    progress: Progress = None,
+) -> None:
     state, result = running_state()
     if not state:
         clear_state()
-        print("Control Center is not running.")
+        emit("Control Center is not running.", progress)
         return
     if result.get("operation_running") and not force_stop:
         raise ControlCenterError(
@@ -382,13 +427,16 @@ def stop_service(force_stop: bool = False) -> None:
     pid = state.get("pid")
     if not isinstance(pid, int):
         raise ControlCenterError("The service state does not contain a valid process ID.")
-    print("Stopping the local Control Center…")
+    emit("Stopping the local Control Center…", progress)
     terminate_pid(pid)
     deadline = time.monotonic() + (1 if os.name == "nt" else 10)
     while time.monotonic() < deadline:
         if not health(state, timeout=0.4):
             clear_state()
-            print("Control Center stopped. Evidence and settings were preserved.")
+            emit(
+                "Control Center stopped. Evidence and settings were preserved.",
+                progress,
+            )
             return
         time.sleep(0.25)
     terminate_pid(pid, force=True)
@@ -399,16 +447,68 @@ def stop_service(force_stop: bool = False) -> None:
             f"Review {LOG_FILE} and stop process {pid} through the operating system."
         )
     clear_state()
-    print("Control Center stopped. Evidence and settings were preserved.")
+    emit("Control Center stopped. Evidence and settings were preserved.", progress)
+
+
+def install_product(
+    open_browser: bool = True,
+    progress: Progress = None,
+) -> dict:
+    """Install dependencies and register the persistent localhost supervisor."""
+    install_dependencies(progress=progress)
+    try:
+        marker = supervisor_setup.register_supervisor(
+            ROOT,
+            getattr(sys, "_base_executable", "") or sys.executable,
+            progress=progress,
+        )
+    except supervisor_setup.SupervisorSetupError as exc:
+        raise ControlCenterError(str(exc)) from exc
+    if open_browser:
+        webbrowser.open(supervisor_setup.SUPERVISOR_URL, new=2)
+    emit(
+        "Installation complete. All routine controls are now available at "
+        f"{supervisor_setup.SUPERVISOR_URL}",
+        progress,
+    )
+    return marker
+
+
+def uninstall_product(
+    force_stop: bool = False,
+    progress: Progress = None,
+) -> None:
+    """Remove supervisor registration while preserving runtime and evidence."""
+    stop_service(force_stop=force_stop, progress=progress)
+    try:
+        supervisor_setup.unregister_supervisor(ROOT, progress=progress)
+        supervisor_setup.stop_supervisor_process(ROOT, progress=progress)
+    except supervisor_setup.SupervisorSetupError as exc:
+        raise ControlCenterError(str(exc)) from exc
+    emit(
+        "Uninstall complete. Evidence, settings, and the private runtime were "
+        "preserved. Delete the extracted folder only under the client's "
+        "approved retention process.",
+        progress,
+    )
 
 
 def show_status() -> None:
     state, result = running_state()
+    supervisor_health = supervisor_setup.supervisor_health(ROOT)
+    registration = supervisor_setup.registration_status(ROOT)
     print(f"Nutanix STIG Control Center {VERSION}")
     print(f"Platform      : {platform.system()} {platform.release()}")
     print(f"Python        : {platform.python_version()} ({sys.executable})")
     print(f"Application   : {ROOT}")
     print(f"Environment   : {'ready' if dependencies_work() else 'not installed'}")
+    print(
+        "Supervisor    : "
+        + ("running" if supervisor_health else "stopped")
+        + (" / registered" if registration else " / not registered")
+    )
+    if supervisor_health:
+        print(f"Supervisor URL: {supervisor_setup.SUPERVISOR_URL}")
     print(f"Service       : {'running' if state else 'stopped'}")
     if state:
         print(f"Local URL     : {state['url']}")
@@ -441,6 +541,22 @@ def doctor() -> None:
         print("[PASS] Isolated dependencies import successfully")
     else:
         print("[WARN] Isolated dependencies are not installed")
+    registration = supervisor_setup.registration_status(ROOT)
+    supervisor_health = supervisor_setup.supervisor_health(ROOT)
+    if registration:
+        print(
+            "[PASS] Supervisor registration recorded: "
+            f"{registration.get('kind', 'registered')}"
+        )
+    else:
+        print("[WARN] Supervisor is not registered for automatic login start")
+    if supervisor_health:
+        print(
+            "[PASS] Local supervisor identity verified at "
+            f"{supervisor_setup.SUPERVISOR_URL}"
+        )
+    else:
+        print("[INFO] Local supervisor is stopped")
     state, result = running_state()
     if state:
         print(f"[PASS] Local service identity verified at {state['url']}")
@@ -463,7 +579,17 @@ def main() -> int:
         "command",
         nargs="?",
         default="start",
-        choices=("install", "start", "stop", "restart", "open", "status", "doctor", "repair"),
+        choices=(
+            "install",
+            "uninstall",
+            "start",
+            "stop",
+            "restart",
+            "open",
+            "status",
+            "doctor",
+            "repair",
+        ),
     )
     parser.add_argument(
         "--no-browser",
@@ -480,7 +606,9 @@ def main() -> int:
     try:
         with controller_lock():
             if args.command == "install":
-                install_dependencies()
+                install_product(open_browser=not args.no_browser)
+            elif args.command == "uninstall":
+                uninstall_product(force_stop=args.force_stop)
             elif args.command == "start":
                 start_service(open_browser=not args.no_browser)
             elif args.command == "stop":

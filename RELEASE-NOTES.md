@@ -1,25 +1,23 @@
-# Nutanix STIG Control Center 1.1.0 — Universal Edition
+# Nutanix STIG Control Center 1.2.0 — Supervisor Edition
 
-Release date: July 23, 2026
+Release date: July 24, 2026
 
-## Changes from 1.0
+## Changes from 1.1
 
-- Removed the legacy third-party launcher as an installation and runtime
-  dependency.
-- Added one shared Python controller for Windows, macOS, and Linux.
-- Added native click-to-install/start/stop/repair entry points.
-- Added automatic first-start installation into an isolated virtual
-  environment.
-- Added background service startup, automatic browser opening, status,
-  restart, diagnostics, and evidence-preserving repair.
-- Added a random service-instance identity so status and stop actions target
-  only the exact local service started by this package.
-- Preserved all existing cluster safety gates, reports, rollback behavior,
-  Nutanix v4 identity support, and one-cluster isolation.
+- Added a dependency-free supervisor fixed at `http://127.0.0.1:8765`.
+- Added browser controls for dependency install/repair, Start, Stop, Restart,
+  Open Control Center, live status, and Uninstall.
+- Added background job progress polling for install and repair.
+- Added per-user automatic startup through Windows Scheduled Task, macOS
+  launchd, and Linux `systemd --user`.
+- Added a one-time Windows UAC handoff for task registration while keeping the
+  installed task at the limited-user run level.
+- Reduced lifecycle launchers to one installer per operating system.
+- Preserved active-operation stop protection, process identity verification,
+  evidence, settings, host trust, and one-cluster isolation.
 
 ## Portability boundary
 
-The source distribution is operating-system agnostic but requires a compatible
-64-bit Python 3.10+ installation. A single compiled executable cannot be
-universal across Windows, macOS, Linux, and CPU architectures; this package
-uses the standard Python runtime to remain portable and auditable.
+One initial installer double-click or launch is required because a local
+process must exist before a webpage can be served. After installation, routine
+lifecycle actions are available in the supervisor page.

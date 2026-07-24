@@ -50,7 +50,7 @@ KNOWN_HOSTS.touch(mode=0o600, exist_ok=True)
 
 app = FastAPI(
     title="Nutanix STIG Control Center",
-    version="1.1.0",
+    version="1.2.0",
     docs_url=None,
     redoc_url=None,
     openapi_url="/api/openapi.json",
@@ -352,7 +352,7 @@ def bootstrap(request: Request, response: Response) -> dict[str, Any]:
     state = active_state()
     return {
         "csrf": sessions[sid]["csrf"],
-        "version": "1.1.0",
+        "version": "1.2.0",
         "active_cluster": state.get("active_cluster"),
         "latest_dry_run": state.get("latest_dry_run"),
         "profiles": [
@@ -1261,7 +1261,7 @@ def main() -> None:
     global INSTANCE_ID
     parser = argparse.ArgumentParser(description="Nutanix STIG Control Center")
     parser.add_argument("--host", default="127.0.0.1")
-    parser.add_argument("--port", type=int, default=8765)
+    parser.add_argument("--port", type=int, default=8766)
     parser.add_argument("--instance-id", default="unmanaged")
     args = parser.parse_args()
     if args.host not in {"127.0.0.1", "localhost", "::1"}:
