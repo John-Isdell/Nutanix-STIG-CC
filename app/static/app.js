@@ -6,6 +6,7 @@ let privateKeyText = "";
 let pcPrivateKeyText = "";
 let apiCaText = "";
 let inspectedFingerprint = null;
+let fingerprintInspectionSequence = 0;
 let currentJob = null;
 let applyReady = false;
 let noticeTimer = null;
@@ -192,21 +193,66 @@ async function inspectPcHostKey() {
   return inspectHostKeyFor(value("pc-host"), numberValue("pc-port"));
 }
 
+function updateTrustButtonState() {
+  $("trust-key").disabled = !inspectedFingerprint || !value("fingerprint-suffix");
+}
+
+function invalidateFingerprintInspection() {
+  fingerprintInspectionSequence += 1;
+  inspectedFingerprint = null;
+  $("fingerprint-suffix").value = "";
+  $("fingerprint-suffix").placeholder = "";
+  $("fingerprint-target").textContent = "Presented fingerprint";
+  $("fingerprint-value").textContent = "";
+  $("fingerprint-help").textContent = "";
+  $("fingerprint-panel").classList.remove("loading");
+  $("fingerprint-panel").classList.add("hidden");
+  $("inspect-key").disabled = false;
+  $("inspect-pc-key").disabled = false;
+  updateTrustButtonState();
+}
+
 async function inspectHostKeyFor(host, port) {
+  const inspectionSequence = ++fingerprintInspectionSequence;
+  inspectedFingerprint = null;
+  $("fingerprint-suffix").value = "";
+  $("fingerprint-suffix").placeholder = "";
+  $("fingerprint-target").textContent = `Inspecting ${host}:${port}`;
+  $("fingerprint-value").textContent = "Reading the presented host key…";
+  $("fingerprint-help").textContent = "The previous fingerprint is no longer selected.";
+  $("fingerprint-panel").classList.remove("hidden");
+  $("fingerprint-panel").classList.add("loading");
+  $("inspect-key").disabled = true;
+  $("inspect-pc-key").disabled = true;
+  updateTrustButtonState();
   try {
     const result = await api("/api/host-key/inspect", {
       method: "POST",
       body: JSON.stringify({ host, port })
     });
+    if (inspectionSequence !== fingerprintInspectionSequence) return;
     inspectedFingerprint = result;
+    $("fingerprint-target").textContent = `Presented fingerprint for ${result.host}:${result.port}`;
     $("fingerprint-value").textContent = `${result.algorithm} ${result.fingerprint}`;
     $("fingerprint-help").textContent = result.instruction;
+    $("fingerprint-suffix").value = "";
     $("fingerprint-suffix").placeholder = result.verification_suffix;
-    $("fingerprint-panel").classList.remove("hidden");
+    updateTrustButtonState();
     $("fingerprint-panel").scrollIntoView({ behavior: "smooth", block: "center" });
     notify("Host key inspected. Verify it independently before trusting.", "info");
   } catch (error) {
+    if (inspectionSequence !== fingerprintInspectionSequence) return;
+    $("fingerprint-target").textContent = `No fingerprint selected for ${host}:${port}`;
+    $("fingerprint-value").textContent = "Inspection failed";
+    $("fingerprint-help").textContent = "Correct the connection details and inspect this host again.";
     notify(error.message, "error", true);
+  } finally {
+    if (inspectionSequence === fingerprintInspectionSequence) {
+      $("fingerprint-panel").classList.remove("loading");
+      $("inspect-key").disabled = false;
+      $("inspect-pc-key").disabled = false;
+      updateTrustButtonState();
+    }
   }
 }
 
@@ -222,7 +268,7 @@ async function trustHostKey() {
         verification_suffix: value("fingerprint-suffix")
       })
     });
-    $("fingerprint-panel").classList.add("hidden");
+    invalidateFingerprintInspection();
     $("connection-status").textContent = "Host key trusted; connection not tested";
     notify("SSH host key added to this app's private trust store.", "success");
   } catch (error) {
@@ -713,6 +759,10 @@ function wireEvents() {
   $("inspect-key").addEventListener("click", inspectHostKey);
   $("inspect-pc-key").addEventListener("click", inspectPcHostKey);
   $("trust-key").addEventListener("click", trustHostKey);
+  $("fingerprint-suffix").addEventListener("input", updateTrustButtonState);
+  ["cluster-host", "ssh-port", "pc-host", "pc-port"].forEach((id) => {
+    $(id).addEventListener("input", invalidateFingerprintInspection);
+  });
   $("test-connection").addEventListener("click", testConnection);
   $("test-pc-connection").addEventListener("click", testPcConnection);
   $("test-api").addEventListener("click", testV4);
