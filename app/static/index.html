@@ -1,0 +1,376 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="light">
+  <title>Nutanix STIG Control Center</title>
+  <link rel="stylesheet" href="/assets/app.css">
+</head>
+<body>
+  <div class="shell">
+    <aside class="rail">
+      <a class="brand" href="#top" aria-label="Nutanix STIG Control Center">
+        <span class="brand-mark" aria-hidden="true">N</span>
+        <span><b>STIG</b><small>Control Center</small></span>
+      </a>
+      <nav aria-label="Workflow">
+        <a href="#connect"><span>1</span>Connect</a>
+        <a href="#configure"><span>2</span>Configure</a>
+        <a href="#dry-run"><span>3</span>Dry run</a>
+        <a href="#apply"><span>4</span>Apply</a>
+        <a href="#audit"><span>5</span>Audit</a>
+      </nav>
+      <div class="rail-note">
+        <span class="status-dot"></span>
+        Local workstation only
+        <small>No public listener. One active cluster.</small>
+      </div>
+      <div class="rail-links">
+        <a href="/api/docs/universal-guide">Client guide</a>
+        <a href="/api/docs/verification-report">Verification report</a>
+      </div>
+    </aside>
+
+    <main id="top">
+      <header class="topbar">
+        <div>
+          <p class="eyebrow">Controlled Nutanix hardening</p>
+          <h1>From assessment to evidence—without the command line.</h1>
+          <p class="lede">Trust the target, test access, run a no-change assessment, approve the exact plan, then verify every automated change.</p>
+        </div>
+        <div class="context-card">
+          <span>Active workspace</span>
+          <b id="active-host">No cluster selected</b>
+          <small id="active-meta">Activate a connection to begin.</small>
+          <button class="link-button hidden" id="close-context-button" type="button">Close workspace</button>
+        </div>
+      </header>
+
+      <section class="safety-strip" aria-label="Safety controls">
+        <div><b>Dry run first</b><span>Apply stays locked until a matching full-health assessment passes.</span></div>
+        <div><b>Credentials are ephemeral</b><span>Passwords and private keys are never saved in configuration or evidence.</span></div>
+        <div><b>Verified readback</b><span>Each automated write is tested against the resulting cluster state.</span></div>
+      </section>
+
+      <div id="notice" class="notice hidden" role="status" aria-live="polite"></div>
+
+      <section id="connect" class="panel">
+        <div class="section-heading">
+          <div><span class="step-label">Step 1</span><h2>Connect and establish trust</h2></div>
+          <p>The CVM cluster virtual IP is the primary target. Verify its SSH host key through a trusted, separate channel before entering credentials.</p>
+        </div>
+
+        <div class="form-grid three">
+          <label>Cluster CVM virtual IP or DNS
+            <input id="cluster-host" autocomplete="off" placeholder="10.10.10.100" required>
+          </label>
+          <label>SSH port
+            <input id="ssh-port" type="number" min="1" max="65535" value="22">
+          </label>
+          <label>SSH username
+            <input id="username" autocomplete="username" value="nutanix">
+          </label>
+        </div>
+
+        <div class="trust-box">
+          <div>
+            <h3>1A. Trust the CVM host key</h3>
+            <p>Inspection does not authenticate and makes no cluster changes.</p>
+          </div>
+          <button class="secondary" id="inspect-key" type="button">Inspect host key</button>
+          <div id="fingerprint-panel" class="fingerprint hidden">
+            <span>Presented fingerprint</span>
+            <code id="fingerprint-value"></code>
+            <p id="fingerprint-help"></p>
+            <label>After independent verification, type the final 12 characters
+              <input id="fingerprint-suffix" autocomplete="off">
+            </label>
+            <button class="secondary" id="trust-key" type="button">Trust this key</button>
+          </div>
+        </div>
+
+        <div class="auth-card">
+          <div class="choice-row" role="group" aria-label="Authentication method">
+            <label class="choice"><input type="radio" name="auth" value="password" checked><span>Password</span></label>
+            <label class="choice"><input type="radio" name="auth" value="key"><span>SSH private key</span></label>
+          </div>
+          <div id="password-auth">
+            <label>SSH password
+              <input id="password" type="password" autocomplete="current-password" placeholder="Held in memory for this browser session">
+            </label>
+          </div>
+          <div id="key-auth" class="hidden form-grid two">
+            <label>Private key file
+              <input id="private-key-file" type="file" accept=".pem,.key,.ppk,.txt">
+            </label>
+            <label>Key passphrase, if used
+              <input id="key-passphrase" type="password" autocomplete="off">
+            </label>
+          </div>
+          <div class="action-row">
+            <button class="primary" id="test-connection" type="button">Test CVM connection</button>
+            <span id="connection-status" class="inline-status">Not tested</span>
+          </div>
+        </div>
+
+        <details class="advanced">
+          <summary>Optional Prism Central and Nutanix v4 identity</summary>
+          <div class="details-body">
+            <div class="form-grid three">
+              <label>Prism Central VM address
+                <input id="pc-host" autocomplete="off" placeholder="Required only for PCVM scope">
+              </label>
+              <label>PCVM SSH port
+                <input id="pc-port" type="number" min="1" max="65535" value="22">
+              </label>
+              <label>PCVM SSH username
+                <input id="pc-username" value="nutanix">
+              </label>
+            </div>
+            <label class="toggle"><input id="pc-same-auth" type="checkbox" checked><span></span>Use the CVM SSH credential for PCVM</label>
+            <div id="pc-auth-fields" class="hidden auth-card">
+              <div class="choice-row" role="group" aria-label="PCVM authentication method">
+                <label class="choice"><input type="radio" name="pc-auth" value="password" checked><span>PCVM password</span></label>
+                <label class="choice"><input type="radio" name="pc-auth" value="key"><span>PCVM private key</span></label>
+              </div>
+              <div id="pc-password-auth">
+                <label>PCVM SSH password
+                  <input id="pc-password" type="password" autocomplete="current-password">
+                </label>
+              </div>
+              <div id="pc-key-auth" class="hidden form-grid two">
+                <label>PCVM private key file
+                  <input id="pc-private-key-file" type="file" accept=".pem,.key,.ppk,.txt">
+                </label>
+                <label>PCVM key passphrase, if used
+                  <input id="pc-key-passphrase" type="password" autocomplete="off">
+                </label>
+              </div>
+            </div>
+            <div class="action-row">
+              <button class="secondary" id="inspect-pc-key" type="button">Inspect PCVM host key</button>
+              <button class="secondary" id="test-pc-connection" type="button">Test PCVM connection</button>
+              <span id="pc-connection-status" class="inline-status">Not tested</span>
+            </div>
+            <label class="toggle"><input id="api-enabled" type="checkbox"><span></span>Verify cluster identity with Nutanix v4.2 (read-only)</label>
+            <div id="api-fields" class="hidden">
+              <div class="form-grid three">
+                <label>Prism API address
+                  <input id="api-host" autocomplete="off" placeholder="Prism Element or Central">
+                </label>
+                <label>API port
+                  <input id="api-port" type="number" value="9440" min="1" max="65535">
+                </label>
+                <label>API username
+                  <input id="api-username" autocomplete="username">
+                </label>
+                <label>API password
+                  <input id="api-password" type="password" autocomplete="current-password">
+                </label>
+                <label class="span-two">Trusted CA bundle, when the Prism certificate is not in system trust
+                  <input id="api-ca-file" type="file" accept=".pem,.crt,.cer">
+                </label>
+              </div>
+              <button class="secondary" id="test-api" type="button">Verify v4 identity</button>
+              <div id="api-result" class="result-box hidden"></div>
+            </div>
+          </div>
+        </details>
+      </section>
+
+      <section id="configure" class="panel">
+        <div class="section-heading">
+          <div><span class="step-label">Step 2</span><h2>Choose the intended security state</h2></div>
+          <p>Configuration is saved without secrets. Runtime discovery filters unsupported release-specific parameters before any plan is built.</p>
+        </div>
+
+        <div class="profile-grid">
+          <label class="profile">
+            <input type="radio" name="profile" value="STIG_STANDARD" checked>
+            <span><b>STIG Standard</b><small>Recommended baseline with SNMPv3.</small></span>
+          </label>
+          <label class="profile">
+            <input type="radio" name="profile" value="STIG_HIGH">
+            <span><b>STIG High</b><small>Stricter values; validate application impact.</small></span>
+          </label>
+          <label class="profile">
+            <input type="radio" name="profile" value="DODIN_APL">
+            <span><b>DoDIN APL</b><small>Profile aligned to the execution guide.</small></span>
+          </label>
+          <label class="profile">
+            <input type="radio" name="profile" value="REPORT_ONLY">
+            <span><b>Report only</b><small>Assessment without an Apply path.</small></span>
+          </label>
+        </div>
+
+        <div class="config-columns">
+          <div>
+            <h3>Scopes</h3>
+            <label class="check"><input id="scope-cvm" type="checkbox" checked><span>CVM security parameters</span></label>
+            <label class="check"><input id="scope-ahv" type="checkbox" checked><span>AHV security parameters</span></label>
+            <label class="check"><input id="scope-pcvm" type="checkbox"><span>Prism Central VM parameters</span></label>
+          </div>
+          <div>
+            <h3>Apply gate</h3>
+            <label class="toggle"><input id="full-health" type="checkbox" checked><span></span>Run full NCC health check</label>
+            <p class="field-note">You may turn this off for a quick assessment, but Apply will remain locked.</p>
+          </div>
+        </div>
+
+        <details class="advanced">
+          <summary>Optional syslog forwarding and timing</summary>
+          <div class="details-body">
+            <label class="toggle"><input id="syslog-enabled" type="checkbox"><span></span>Include remote syslog configuration in the plan</label>
+            <div id="syslog-fields" class="hidden form-grid three">
+              <label>Server label<input id="syslog-name" value="SIEM01"></label>
+              <label>Server IP<input id="syslog-ip" placeholder="10.20.5.40"></label>
+              <label>Port<input id="syslog-port" type="number" value="514" min="1" max="65535"></label>
+              <label>Protocol
+                <select id="syslog-protocol"><option value="tcp">TCP</option><option value="udp">UDP</option></select>
+              </label>
+              <label class="toggle compact"><input id="syslog-relp" type="checkbox" checked><span></span>RELP enabled</label>
+              <label>Modules<input id="syslog-modules" value="AUDIT,API_AUDIT,PRISM"></label>
+            </div>
+            <div class="form-grid three">
+              <label>Command timeout (seconds)<input id="command-timeout" type="number" value="300" min="30" max="3600"></label>
+              <label>Verification timeout<input id="verification-timeout" type="number" value="120" min="0" max="1800"></label>
+              <label>Readback interval<input id="verification-interval" type="number" value="10" min="1" max="120"></label>
+              <label>Minimum DNS servers<input id="min-dns" type="number" value="2" min="1" max="10"></label>
+              <label>Minimum NTP servers<input id="min-ntp" type="number" value="2" min="1" max="10"></label>
+            </div>
+          </div>
+        </details>
+        <div class="action-row">
+          <button class="primary" id="activate-config" type="button">Activate configuration</button>
+          <span class="inline-status" id="config-status">Not activated</span>
+        </div>
+      </section>
+
+      <section id="dry-run" class="panel">
+        <div class="section-heading">
+          <div><span class="step-label">Step 3</span><h2>Assess without changing the cluster</h2></div>
+          <p>The engine captures a baseline, checks cluster health, discovers supported flags, and builds the exact plan. Dry run is always no-change.</p>
+        </div>
+        <div class="launch-card">
+          <div>
+            <b>Ready for assessment</b>
+            <span id="dry-run-copy">Connection credentials are required each time; they are discarded when the operation finishes.</span>
+          </div>
+          <button class="primary large" id="run-dry" type="button">Run dry assessment</button>
+        </div>
+        <div id="job-panel" class="job-panel hidden">
+          <div class="job-head">
+            <div><span id="job-mode"></span><b id="job-state"></b></div>
+            <span id="job-id"></span>
+          </div>
+          <div class="progress"><i id="job-progress"></i></div>
+          <pre id="job-console" class="console hidden"></pre>
+          <div id="job-result"></div>
+        </div>
+      </section>
+
+      <section id="apply" class="panel">
+        <div class="section-heading">
+          <div><span class="step-label">Step 4</span><h2>Review, approve, and verify</h2></div>
+          <p>Apply is bound to the last successful dry run. Any change to the target, profile, scope, syslog, or timing settings requires another dry run.</p>
+        </div>
+        <div class="gate-card">
+          <div id="apply-gate-icon" class="gate-icon locked">×</div>
+          <div><b id="apply-gate-title">Apply is locked</b><span id="apply-gate-copy">Complete a successful full-health dry run.</span></div>
+          <button class="danger" id="open-apply" type="button" disabled>Review and Apply</button>
+        </div>
+        <div class="boundary">
+          <div><h3>What the tool automates</h3><ul id="can-list"></ul></div>
+          <div><h3>What remains manual—and why</h3><div id="cannot-list"></div></div>
+        </div>
+      </section>
+
+      <section id="audit" class="panel">
+        <div class="section-heading">
+          <div><span class="step-label">Step 5</span><h2>Evidence, audit, and next steps</h2></div>
+          <p>Download the evidence package after every run. Track manual controls here; completion status is local to the active cluster workspace.</p>
+        </div>
+        <div class="audit-toolbar">
+          <button class="secondary" id="refresh-audit" type="button">Refresh audit</button>
+          <span id="audit-summary">No operations yet.</span>
+        </div>
+        <div id="audit-list" class="audit-list"></div>
+
+        <h3 class="subheading">Manual and externally validated controls</h3>
+        <div id="manual-controls" class="manual-list"></div>
+      </section>
+
+      <footer>
+        <span>Nutanix STIG Control Center 1.1 Universal</span>
+        <span>Local evidence is not a substitute for ISSO authorization or an accredited scan.</span>
+      </footer>
+    </main>
+  </div>
+
+  <dialog id="apply-dialog">
+    <form method="dialog" id="apply-form">
+      <div class="dialog-head">
+        <div><span class="step-label">Change authorization</span><h2>Approve the assessed plan</h2></div>
+        <button class="icon-button" value="cancel" aria-label="Close">×</button>
+      </div>
+      <p>This action will change the active Nutanix cluster. The engine will stop on failed preflight and verify each applied value by readback.</p>
+      <label>Change / approval ID
+        <input id="approval-id" placeholder="CHG0123456" autocomplete="off">
+      </label>
+      <label class="check"><input id="ack-backup" type="checkbox"><span>I confirmed a current backup / recovery path and console access.</span></label>
+      <label class="check"><input id="ack-window" type="checkbox"><span>I am inside the approved maintenance window.</span></label>
+      <label class="check"><input id="ack-authorized" type="checkbox"><span>I am authorized to make these changes to this cluster.</span></label>
+      <label>Type <code id="apply-phrase"></code>
+        <input id="typed-confirmation" autocomplete="off">
+      </label>
+      <div class="dialog-actions">
+        <button class="secondary" value="cancel">Cancel</button>
+        <button class="danger" id="confirm-apply" value="default">Apply and verify</button>
+      </div>
+    </form>
+  </dialog>
+
+  <dialog id="close-dialog">
+    <form method="dialog" id="close-form">
+      <div class="dialog-head">
+        <div><span class="step-label">Cluster isolation</span><h2>Close active workspace</h2></div>
+        <button class="icon-button" value="cancel" aria-label="Close">×</button>
+      </div>
+      <p>Closing allows a different cluster to become active. Existing evidence and audit files are preserved.</p>
+      <label>Type <code id="close-phrase"></code>
+        <input id="close-confirmation" autocomplete="off">
+      </label>
+      <div class="dialog-actions">
+        <button class="secondary" value="cancel">Cancel</button>
+        <button class="danger" id="confirm-close" value="default">Close workspace</button>
+      </div>
+    </form>
+  </dialog>
+
+  <dialog id="rollback-dialog">
+    <form method="dialog" id="rollback-form">
+      <div class="dialog-head">
+        <div><span class="step-label">Recovery authorization</span><h2>Apply the previewed rollback</h2></div>
+        <button class="icon-button" value="cancel" aria-label="Close">×</button>
+      </div>
+      <p>Rollback restores only values recorded in the selected change manifest. The preview must match the current cluster configuration and credentials are required again.</p>
+      <label>Change / approval ID
+        <input id="rollback-approval-id" placeholder="CHG0123456" autocomplete="off">
+      </label>
+      <label class="check"><input id="rollback-ack-backup" type="checkbox"><span>I confirmed console access and the current recovery path.</span></label>
+      <label class="check"><input id="rollback-ack-window" type="checkbox"><span>I am inside the approved recovery window.</span></label>
+      <label class="check"><input id="rollback-ack-authorized" type="checkbox"><span>I am authorized to roll back this cluster.</span></label>
+      <label>Type <code id="rollback-phrase"></code>
+        <input id="rollback-confirmation" autocomplete="off">
+      </label>
+      <div class="dialog-actions">
+        <button class="secondary" value="cancel">Cancel</button>
+        <button class="danger" id="confirm-rollback" value="default">Rollback and verify</button>
+      </div>
+    </form>
+  </dialog>
+
+  <script src="/assets/app.js" defer></script>
+</body>
+</html>
