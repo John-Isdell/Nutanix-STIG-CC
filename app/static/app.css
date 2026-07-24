@@ -127,6 +127,7 @@ input[type="file"] { padding: 8px; }
 .fingerprint > span { color: var(--muted); font-size: 12px; display: block; }
 .fingerprint code { display: block; background: #102b3e; color: #a8f0e8; padding: 13px; border-radius: 8px; margin: 8px 0; overflow-wrap: anywhere; }
 .fingerprint p { margin-bottom: 13px; }
+.fingerprint.loading code { background: #e8eef1; color: var(--muted); }
 .auth-card { background: #fff; }
 .choice-row { display: flex; gap: 8px; margin-bottom: 18px; }
 .choice input, .profile input { position: absolute; opacity: 0; pointer-events: none; }

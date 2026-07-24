@@ -80,13 +80,13 @@
           </div>
           <button class="secondary" id="inspect-key" type="button">Inspect host key</button>
           <div id="fingerprint-panel" class="fingerprint hidden">
-            <span>Presented fingerprint</span>
+            <span id="fingerprint-target">Presented fingerprint</span>
             <code id="fingerprint-value"></code>
             <p id="fingerprint-help"></p>
             <label>After independent verification, type the final 12 characters
               <input id="fingerprint-suffix" autocomplete="off">
             </label>
-            <button class="secondary" id="trust-key" type="button">Trust this key</button>
+            <button class="secondary" id="trust-key" type="button" disabled>Trust this key</button>
           </div>
         </div>
 
