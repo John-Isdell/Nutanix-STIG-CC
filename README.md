@@ -61,14 +61,16 @@ supervisor.
 
 ## Release downloads and checksums
 
-Tagged releases publish three source packages:
+Download the latest stable release:
 
-- `Nutanix-STIG-Control-Center-VERSION-windows.zip`
-- `Nutanix-STIG-Control-Center-VERSION-macos.zip`
-- `Nutanix-STIG-Control-Center-VERSION-linux.tar.gz`
+- [Windows package (1.3.0)](https://github.com/John-Isdell/Nutanix-STIG-CC/releases/download/v1.3.0/Nutanix-STIG-Control-Center-1.3.0-windows.zip)
+- [macOS package (1.3.0)](https://github.com/John-Isdell/Nutanix-STIG-CC/releases/download/v1.3.0/Nutanix-STIG-Control-Center-1.3.0-macos.zip)
+- [Linux package (1.3.0)](https://github.com/John-Isdell/Nutanix-STIG-CC/releases/download/v1.3.0/Nutanix-STIG-Control-Center-1.3.0-linux.tar.gz)
+- [SHA-256 checksums](https://github.com/John-Isdell/Nutanix-STIG-CC/releases/download/v1.3.0/SHA256SUMS.txt)
 
-Download the matching platform package and `SHA256SUMS.txt` from the same
-GitHub Release. Verify the archive before extraction. On macOS:
+The [latest GitHub Release](https://github.com/John-Isdell/Nutanix-STIG-CC/releases/latest)
+contains the matching platform packages and checksum manifest. Verify the
+archive before extraction. On macOS:
 
 ```text
 grep "ARCHIVE-NAME" SHA256SUMS.txt | shasum -a 256 -c -
