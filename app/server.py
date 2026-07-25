@@ -6,7 +6,9 @@ from __future__ import annotations
 import argparse
 import base64
 import configparser
+import csv
 import hashlib
+import io
 import ipaddress
 import json
 import os
@@ -20,11 +22,13 @@ import uuid
 import zipfile
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timezone
+from functools import wraps
 from pathlib import Path
 from typing import Any, Literal
 
 import httpx
 import paramiko
+from audit_log import AuditIntegrityError, AuditLedger
 from core.nutanix_stig_harden import MANUAL_CONTROLS, PROFILE_NOTES, PROFILES
 from fastapi import Depends, FastAPI, Header, HTTPException, Request, Response
 from fastapi.responses import FileResponse
@@ -38,7 +42,6 @@ DATA_DIR = APP_DIR / "data"
 RUNS_DIR = DATA_DIR / "runs"
 KNOWN_HOSTS = DATA_DIR / "known_hosts"
 STATE_FILE = DATA_DIR / "state.json"
-AUDIT_FILE = DATA_DIR / "audit.json"
 ENGINE = APP_DIR / "core" / "nutanix_stig_harden.py"
 
 for directory in (DATA_DIR, RUNS_DIR):
@@ -55,6 +58,7 @@ app = FastAPI(
 app.mount("/assets", StaticFiles(directory=STATIC_DIR), name="assets")
 
 state_lock = threading.RLock()
+audit_lock = threading.RLock()
 operation_executor = ThreadPoolExecutor(max_workers=1, thread_name_prefix="stig-operation")
 sessions: dict[str, dict[str, Any]] = {}
 jobs: dict[str, dict[str, Any]] = {}
@@ -149,6 +153,82 @@ def config_fingerprint(payload: dict[str, Any]) -> str:
     return hashlib.sha256(encoded).hexdigest()
 
 
+def audit_ledger() -> AuditLedger:
+    """Resolve audit paths at call time so test and packaged data roots remain isolated."""
+    ledger = AuditLedger(DATA_DIR / "audit", DATA_DIR / "audit.json")
+    with audit_lock:
+        ledger.migrate_legacy()
+    return ledger
+
+
+def actor_id(session_id: str) -> str:
+    digest = hashlib.sha256(session_id.encode("utf-8")).hexdigest()[:20]
+    return f"local-session:{digest}"
+
+
+def append_audit_event(
+    *,
+    actor: str,
+    source: str,
+    action: str,
+    target_host: str | None,
+    result: str,
+    details: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    with audit_lock:
+        return audit_ledger().append(
+            actor_id=actor,
+            source=source,
+            action=action,
+            target_host=target_host,
+            result=result,
+            details=details,
+        )
+
+
+def audited_failures(action: str, target_getter):
+    """Record endpoint failures with the intended target without inspecting request bodies."""
+
+    def decorate(function):
+        @wraps(function)
+        def wrapper(*args, **kwargs):
+            session_info = kwargs.get("session_info")
+            sid = session_info[0] if session_info else ""
+            try:
+                target = target_getter(*args, **kwargs)
+            except Exception:  # noqa: BLE001 - fall back to the active safe context
+                target = active_host()
+            try:
+                return function(*args, **kwargs)
+            except HTTPException as exc:
+                append_audit_event(
+                    actor=actor_id(sid) if sid else "anonymous-local-request",
+                    source="web",
+                    action=action,
+                    target_host=target,
+                    result="denied" if exc.status_code < 500 else "failed",
+                    details={"http_status": exc.status_code},
+                )
+                exc.headers = {**(exc.headers or {}), "X-Audit-Recorded": "1"}
+                raise
+            except Exception as exc:
+                if not isinstance(exc, AuditIntegrityError):
+                    append_audit_event(
+                        actor=actor_id(sid) if sid else "anonymous-local-request",
+                        source="web",
+                        action=action,
+                        target_host=target,
+                        result="failed",
+                        details={"error_type": type(exc).__name__},
+                    )
+                    setattr(exc, "audit_recorded", True)
+                raise
+
+        return wrapper
+
+    return decorate
+
+
 def active_state() -> dict[str, Any]:
     return load_json(
         STATE_FILE,
@@ -203,11 +283,31 @@ def require_csrf(
     sid, session = get_session(request)
     if not secrets.compare_digest(x_csrf_token, str(session.get("csrf", ""))):
         raise HTTPException(403, "Invalid request token. Refresh the page.")
+    with audit_lock:
+        integrity = audit_ledger().verify()
+    if not integrity["ok"]:
+        raise HTTPException(
+            409,
+            "Audit ledger integrity verification failed. Preserve app/data and stop security work.",
+        )
     return sid, session
 
 
 @app.middleware("http")
 async def local_security_middleware(request: Request, call_next):
+    security_action = {
+        "/api/host-key/inspect": "host_key.inspected",
+        "/api/host-key/trust": "host_key.trusted",
+        "/api/connection/test": "connection.ssh_tested",
+        "/api/v4/cluster-identity": "connection.v4_identity_tested",
+        "/api/configuration/activate": "configuration.activated",
+        "/api/operations/dry-run": "operation.dry_run_requested",
+        "/api/operations/apply": "approval.apply",
+        "/api/operations/rollback": "approval.rollback",
+        "/api/manual-controls": "manual_control.updated",
+        "/api/context/close": "cluster_context.closed",
+        "/api/audit/settings": "audit.settings_updated",
+    }.get(request.url.path)
     raw_host = request.headers.get("host", "").lower()
     if raw_host.startswith("[") and "]" in raw_host:
         host_header = raw_host[1 : raw_host.index("]")]
@@ -220,7 +320,35 @@ async def local_security_middleware(request: Request, call_next):
     origin = request.headers.get("origin")
     if origin and not re.fullmatch(r"https?://(127\.0\.0\.1|localhost|\[::1\])(?::\d+)?", origin):
         return Response("Cross-origin request blocked", status_code=403)
-    response = await call_next(request)
+    try:
+        response = await call_next(request)
+    except AuditIntegrityError:
+        return Response(
+            "Audit ledger integrity verification failed; security actions are locked.",
+            status_code=503,
+        )
+    except Exception as exc:
+        if (
+            security_action
+            and request.method == "POST"
+            and not getattr(exc, "audit_recorded", False)
+        ):
+            sid = request.cookies.get("stig_session", "")
+            try:
+                append_audit_event(
+                    actor=actor_id(sid) if sid else "anonymous-local-request",
+                    source="web",
+                    action=security_action,
+                    target_host=active_host(),
+                    result="failed",
+                    details={"error_type": type(exc).__name__},
+                )
+            except AuditIntegrityError:
+                return Response(
+                    "Audit ledger integrity verification failed; security actions are locked.",
+                    status_code=503,
+                )
+        raise
     response.headers["Cache-Control"] = "no-store"
     response.headers["Content-Security-Policy"] = (
         "default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; "
@@ -230,6 +358,30 @@ async def local_security_middleware(request: Request, call_next):
     response.headers["X-Content-Type-Options"] = "nosniff"
     response.headers["X-Frame-Options"] = "DENY"
     response.headers["Permissions-Policy"] = "camera=(), microphone=(), geolocation=()"
+    audit_already_recorded = response.headers.get("X-Audit-Recorded") == "1"
+    if audit_already_recorded:
+        del response.headers["X-Audit-Recorded"]
+    if (
+        security_action
+        and request.method == "POST"
+        and response.status_code >= 400
+        and not audit_already_recorded
+    ):
+        sid = request.cookies.get("stig_session", "")
+        try:
+            append_audit_event(
+                actor=actor_id(sid) if sid else "anonymous-local-request",
+                source="web",
+                action=security_action,
+                target_host=active_host(),
+                result="denied" if response.status_code < 500 else "failed",
+                details={"http_status": response.status_code},
+            )
+        except AuditIntegrityError:
+            return Response(
+                "Audit ledger integrity verification failed; security actions are locked.",
+                status_code=503,
+            )
     return response
 
 
@@ -307,6 +459,11 @@ class ManualUpdate(BaseModel):
     note: str = Field(default="", max_length=1000)
 
 
+class AuditSettingsUpdate(BaseModel):
+    retention_days: int = Field(default=3650, ge=365, le=7300)
+    rotation: Literal["daily", "monthly"] = "monthly"
+
+
 class V4Payload(BaseModel):
     api_host: str
     api_port: int = Field(default=9440, ge=1, le=65535)
@@ -340,9 +497,11 @@ def home() -> FileResponse:
 @app.get("/api/bootstrap")
 def bootstrap(request: Request, response: Response) -> dict[str, Any]:
     sid = request.cookies.get("stig_session")
+    created = False
     if not sid or sid not in sessions:
         sid = secrets.token_urlsafe(32)
         sessions[sid] = {"csrf": secrets.token_urlsafe(32), "created_at": utc_now()}
+        created = True
     response.set_cookie(
         "stig_session",
         sid,
@@ -352,6 +511,22 @@ def bootstrap(request: Request, response: Response) -> dict[str, Any]:
         path="/",
     )
     state = active_state()
+    audit_warning = None
+    if created:
+        try:
+            append_audit_event(
+                actor=actor_id(sid),
+                source="web",
+                action="session.created",
+                target_host=(state.get("active_cluster") or {}).get("cluster_host"),
+                result="succeeded",
+                details={"local_only": True},
+            )
+        except AuditIntegrityError:
+            audit_warning = (
+                "Audit ledger integrity verification failed. Review the Audit page; "
+                "security actions are locked."
+            )
     return {
         "csrf": sessions[sid]["csrf"],
         "version": "1.2.0",
@@ -363,6 +538,7 @@ def bootstrap(request: Request, response: Response) -> dict[str, Any]:
         ],
         "known_hosts_file": str(KNOWN_HOSTS),
         "local_only": True,
+        "audit_warning": audit_warning,
     }
 
 
@@ -378,6 +554,7 @@ def health() -> dict[str, Any]:
 
 
 @app.post("/api/host-key/inspect")
+@audited_failures("host_key.inspected", lambda payload, **_: payload.host)
 def inspect_host_key(
     payload: HostKeyInspect,
     session_info: tuple[str, dict[str, Any]] = Depends(require_csrf),
@@ -405,6 +582,19 @@ def inspect_host_key(
         "key": key,
         "created_at": utc_now(),
     }
+    append_audit_event(
+        actor=actor_id(sid),
+        source="web",
+        action="host_key.inspected",
+        target_host=host,
+        result="succeeded",
+        details={
+            "port": port,
+            "algorithm": key.get_name(),
+            "bits": key.get_bits(),
+            "fingerprint": fingerprint,
+        },
+    )
     return {
         "host": host,
         "port": port,
@@ -420,6 +610,7 @@ def inspect_host_key(
 
 
 @app.post("/api/host-key/trust")
+@audited_failures("host_key.trusted", lambda payload, **_: payload.host)
 def trust_host_key(
     payload: HostKeyTrust,
     session_info: tuple[str, dict[str, Any]] = Depends(require_csrf),
@@ -446,6 +637,14 @@ def trust_host_key(
     host_keys.add(lookup_name, pending["key"].get_name(), pending["key"])
     host_keys.save(str(KNOWN_HOSTS))
     pending_host_keys.pop(sid, None)
+    append_audit_event(
+        actor=actor_id(sid),
+        source="web",
+        action="host_key.trusted",
+        target_host=host,
+        result="succeeded",
+        details={"port": payload.port, "fingerprint": payload.fingerprint},
+    )
     return {"trusted": True, "host": host, "fingerprint": payload.fingerprint}
 
 
@@ -511,10 +710,12 @@ def open_ssh(payload: dict[str, Any], timeout: int = 30) -> paramiko.SSHClient:
 
 
 @app.post("/api/connection/test")
+@audited_failures("connection.ssh_tested", lambda payload, **_: payload.cluster_host)
 def test_connection(
     payload: ClusterPayload,
-    _: tuple[str, dict[str, Any]] = Depends(require_csrf),
+    session_info: tuple[str, dict[str, Any]] = Depends(require_csrf),
 ) -> dict[str, Any]:
+    sid, _ = session_info
     data = model_data(payload)
     client = open_ssh(data)
     try:
@@ -531,6 +732,19 @@ def test_connection(
             if re.match(r"\s*(Cluster Name|Name)\s*:", line, re.I):
                 cluster_name = line.split(":", 1)[1].strip()[:160]
                 break
+        append_audit_event(
+            actor=actor_id(sid),
+            source="web",
+            action="connection.ssh_tested",
+            target_host=data["cluster_host"],
+            result="succeeded",
+            details={
+                "port": data["ssh_port"],
+                "username": data["username"],
+                "auth_method": data["auth_method"],
+                "ncli_available": True,
+            },
+        )
         return {
             "connected": True,
             "cluster_host": data["cluster_host"],
@@ -543,10 +757,12 @@ def test_connection(
 
 
 @app.post("/api/v4/cluster-identity")
+@audited_failures("connection.v4_identity_tested", lambda payload, **_: payload.api_host)
 def v4_cluster_identity(
     payload: V4Payload,
-    _: tuple[str, dict[str, Any]] = Depends(require_csrf),
+    session_info: tuple[str, dict[str, Any]] = Depends(require_csrf),
 ) -> dict[str, Any]:
+    sid, _ = session_info
     host = validate_host(payload.api_host, "Prism API address")
     client_auth: tuple[str, str] | None = None
     client_headers: dict[str, str] = {}
@@ -604,6 +820,19 @@ def v4_cluster_identity(
                     else "",
                 }
             )
+        append_audit_event(
+            actor=actor_id(sid),
+            source="web",
+            action="connection.v4_identity_tested",
+            target_host=host,
+            result="succeeded",
+            details={
+                "port": payload.api_port,
+                "auth_method": payload.api_auth_method,
+                "clusters_returned": len(inventory),
+                "read_only": True,
+            },
+        )
         return {
             "verified": True,
             "api": "Nutanix Cluster Management v4.2",
@@ -624,12 +853,26 @@ def v4_cluster_identity(
 
 
 @app.post("/api/configuration/activate")
+@audited_failures("configuration.activated", lambda payload, **_: payload.cluster_host)
 def activate_configuration(
     payload: ClusterPayload,
-    _: tuple[str, dict[str, Any]] = Depends(require_csrf),
+    session_info: tuple[str, dict[str, Any]] = Depends(require_csrf),
 ) -> dict[str, Any]:
+    sid, _ = session_info
     data = model_data(payload)
     state = ensure_active_context(data)
+    append_audit_event(
+        actor=actor_id(sid),
+        source="web",
+        action="configuration.activated",
+        target_host=data["cluster_host"],
+        result="succeeded",
+        details={
+            "profile": data["profile"],
+            "scopes": data["scopes"],
+            "configuration_fingerprint": config_fingerprint(data),
+        },
+    )
     return {
         "active_cluster": state["active_cluster"],
         "fingerprint": config_fingerprint(data),
@@ -769,14 +1012,13 @@ def summarized_report(report: dict[str, Any] | None) -> dict[str, Any]:
     }
 
 
-def append_audit(entry: dict[str, Any]) -> None:
-    audit = load_json(AUDIT_FILE, [])
-    audit.append(entry)
-    save_json(AUDIT_FILE, audit[-500:])
-
-
-def evidence_zip(job_dir: Path, job_id: str) -> Path:
+def evidence_zip(job_dir: Path, job_id: str, cluster_host: str) -> Path:
     archive = job_dir / f"nutanix_stig_evidence_{job_id}.zip"
+    with audit_lock:
+        ledger = audit_ledger()
+        engagement_audit = ledger.engagement_entries(cluster_host)
+        audit_integrity = ledger.verify()
+        audit_settings = ledger.settings()
     with zipfile.ZipFile(archive, "w", compression=zipfile.ZIP_DEFLATED) as bundle:
         for item in job_dir.rglob("*"):
             if not item.is_file() or item == archive or item.name.startswith(".operation"):
@@ -784,6 +1026,26 @@ def evidence_zip(job_dir: Path, job_id: str) -> Path:
             bundle.write(item, item.relative_to(job_dir))
         if STATE_FILE.exists():
             bundle.writestr("control-center/active-state-snapshot.json", STATE_FILE.read_text("utf-8"))
+        bundle.writestr(
+            "control-center/audit-trail.jsonl",
+            "".join(
+                json.dumps(entry, sort_keys=True, ensure_ascii=False) + "\n"
+                for entry in engagement_audit
+            ),
+        )
+        bundle.writestr(
+            "control-center/audit-integrity.json",
+            json.dumps(
+                {
+                    "verification": audit_integrity,
+                    "settings": audit_settings,
+                    "target_host": cluster_host,
+                    "exported_at": utc_now(),
+                    "entries": len(engagement_audit),
+                },
+                indent=2,
+            ),
+        )
         bundle.write(
             DOCS_DIR / "Nutanix_STIG_Script_Verification_Report.md",
             "documentation/Nutanix_STIG_Script_Verification_Report.md",
@@ -807,6 +1069,7 @@ def run_engine_job(
     data: dict[str, Any],
     mode: Literal["DRY_RUN", "APPLY", "ROLLBACK_PREVIEW", "ROLLBACK_APPLY"],
     rollback_manifest: Path | None = None,
+    audit_actor: str = "local-system",
 ) -> None:
     global current_job_id
     job_dir = RUNS_DIR / job_id
@@ -906,10 +1169,10 @@ def run_engine_job(
     report_path, report = find_report(job_dir)
     completed_at = utc_now()
     operation_status = "succeeded" if return_code == 0 else "failed"
-    archive = evidence_zip(job_dir, job_id)
     rollback_files = [
         str(path.name) for path in sorted((job_dir / "rollback").glob("*.json"))
     ]
+    evidence_name = f"nutanix_stig_evidence_{job_id}.zip"
     job_summary = {
         "id": job_id,
         "status": operation_status,
@@ -925,19 +1188,55 @@ def run_engine_job(
         "failure": failure,
         "report": summarized_report(report),
         "report_file": report_path.name if report_path else None,
-        "evidence_file": archive.name,
+        "evidence_file": evidence_name,
         "rollback_manifests": rollback_files,
     }
     if rollback_manifest:
         job_summary["source_job_id"] = data.get("source_job_id")
         job_summary["manifest_name"] = data.get("manifest_name")
     save_json(job_dir / "job-summary.json", job_summary)
-    append_audit(job_summary)
+    try:
+        append_audit_event(
+            actor=audit_actor,
+            source="engine",
+            action="operation.completed",
+            target_host=sanitized["cluster_host"],
+            result=operation_status,
+            details={
+                "job_id": job_id,
+                "mode": mode,
+                "profile": sanitized["profile"],
+                "scopes": sanitized["scopes"],
+                "full_health_check": sanitized["full_health_check"],
+                "return_code": return_code,
+                "evidence_file": evidence_name,
+                "rollback_manifests": rollback_files,
+            },
+        )
+    except Exception as exc:  # noqa: BLE001 - publish a terminal job if audit storage fails
+        operation_status = "failed"
+        audit_failure = f"Audit ledger failure after engine completion: {type(exc).__name__}"
+        job_summary["status"] = operation_status
+        job_summary["failure"] = "; ".join(filter(None, [job_summary["failure"], audit_failure]))
+        job_summary["audit_integrity_failure"] = True
+        save_json(job_dir / "job-summary.json", job_summary)
+    try:
+        evidence_zip(job_dir, job_id, sanitized["cluster_host"])
+    except Exception as exc:  # noqa: BLE001 - preserve job visibility if packaging fails
+        operation_status = "failed"
+        evidence_failure = f"Evidence packaging failed: {type(exc).__name__}"
+        job_summary["status"] = operation_status
+        job_summary["failure"] = "; ".join(
+            filter(None, [job_summary["failure"], evidence_failure])
+        )
+        job_summary["evidence_file"] = None
+        save_json(job_dir / "job-summary.json", job_summary)
     with state_lock:
         state = active_state()
         if mode == "DRY_RUN":
             if (
-                return_code == 0
+                operation_status == "succeeded"
+                and return_code == 0
                 and report_preflight_ok(report or {})
                 and sanitized["full_health_check"]
                 and sanitized["profile"] != "REPORT_ONLY"
@@ -981,6 +1280,7 @@ def begin_job(
     data: dict[str, Any],
     mode: Literal["DRY_RUN", "APPLY", "ROLLBACK_PREVIEW", "ROLLBACK_APPLY"],
     rollback_manifest: Path | None = None,
+    audit_actor: str = "local-system",
 ) -> dict[str, Any]:
     global current_job_id
     validate_operation_payload(data)
@@ -999,22 +1299,46 @@ def begin_job(
             "started_at": utc_now(),
             "configuration_fingerprint": config_fingerprint(data),
         }
+        append_audit_event(
+            actor=audit_actor,
+            source="web",
+            action="operation.requested",
+            target_host=data["cluster_host"],
+            result="accepted",
+            details={
+                "job_id": job_id,
+                "mode": mode,
+                "profile": data["profile"],
+                "scopes": data["scopes"],
+                "full_health_check": data["full_health_check"],
+                "configuration_fingerprint": summary["configuration_fingerprint"],
+            },
+        )
         jobs[job_id] = summary
         current_job_id = job_id
-        operation_executor.submit(run_engine_job, job_id, data, mode, rollback_manifest)
+        operation_executor.submit(
+            run_engine_job,
+            job_id,
+            data,
+            mode,
+            rollback_manifest,
+            audit_actor,
+        )
     return summary
 
 
 @app.post("/api/operations/dry-run")
+@audited_failures("operation.dry_run_requested", lambda payload, **_: payload.cluster_host)
 def start_dry_run(
     payload: ClusterPayload,
-    _: tuple[str, dict[str, Any]] = Depends(require_csrf),
+    session_info: tuple[str, dict[str, Any]] = Depends(require_csrf),
 ) -> dict[str, Any]:
+    sid, _ = session_info
     data = model_data(payload)
     if not data["full_health_check"]:
         # A quick assessment is useful, but it cannot authorize Apply.
         pass
-    return begin_job(data, "DRY_RUN")
+    return begin_job(data, "DRY_RUN", audit_actor=actor_id(sid))
 
 
 def validate_authorization(data: dict[str, Any], action: str) -> None:
@@ -1042,13 +1366,29 @@ def validate_apply(data: dict[str, Any]) -> None:
 
 
 @app.post("/api/operations/apply")
+@audited_failures("approval.apply", lambda payload, **_: payload.cluster_host)
 def start_apply(
     payload: ApplyPayload,
-    _: tuple[str, dict[str, Any]] = Depends(require_csrf),
+    session_info: tuple[str, dict[str, Any]] = Depends(require_csrf),
 ) -> dict[str, Any]:
+    sid, _ = session_info
     data = model_data(payload)
     validate_apply(data)
-    return begin_job(data, "APPLY")
+    append_audit_event(
+        actor=actor_id(sid),
+        source="web",
+        action="approval.apply",
+        target_host=data["cluster_host"],
+        result="approved",
+        details={
+            "approval_id": data["approval_id"],
+            "ack_backup": data["ack_backup"],
+            "ack_window": data["ack_window"],
+            "ack_authorized": data["ack_authorized"],
+            "configuration_fingerprint": config_fingerprint(data),
+        },
+    )
+    return begin_job(data, "APPLY", audit_actor=actor_id(sid))
 
 
 def resolve_manifest(source_job_id: str, manifest_name: str) -> Path:
@@ -1064,10 +1404,12 @@ def resolve_manifest(source_job_id: str, manifest_name: str) -> Path:
 
 
 @app.post("/api/operations/rollback")
+@audited_failures("approval.rollback", lambda payload, **_: payload.cluster_host)
 def start_rollback(
     payload: RollbackPayload,
-    _: tuple[str, dict[str, Any]] = Depends(require_csrf),
+    session_info: tuple[str, dict[str, Any]] = Depends(require_csrf),
 ) -> dict[str, Any]:
+    sid, _ = session_info
     data = model_data(payload)
     manifest = resolve_manifest(data["source_job_id"], data["manifest_name"])
     if data["apply_rollback"]:
@@ -1080,8 +1422,33 @@ def start_rollback(
         ):
             raise HTTPException(409, "Preview this exact rollback before applying it.")
         validate_authorization(data, "ROLLBACK")
-        return begin_job(data, "ROLLBACK_APPLY", manifest)
-    return begin_job(data, "ROLLBACK_PREVIEW", manifest)
+        append_audit_event(
+            actor=actor_id(sid),
+            source="web",
+            action="approval.rollback",
+            target_host=data["cluster_host"],
+            result="approved",
+            details={
+                "approval_id": data["approval_id"],
+                "source_job_id": data["source_job_id"],
+                "manifest_name": data["manifest_name"],
+                "ack_backup": data["ack_backup"],
+                "ack_window": data["ack_window"],
+                "ack_authorized": data["ack_authorized"],
+            },
+        )
+        return begin_job(
+            data,
+            "ROLLBACK_APPLY",
+            manifest,
+            audit_actor=actor_id(sid),
+        )
+    return begin_job(
+        data,
+        "ROLLBACK_PREVIEW",
+        manifest,
+        audit_actor=actor_id(sid),
+    )
 
 
 def load_job(job_id: str) -> dict[str, Any]:
@@ -1127,14 +1494,173 @@ def download_evidence(job_id: str, request: Request) -> FileResponse:
     )
 
 
+def audit_query(
+    *,
+    host: str | None,
+    action: str | None,
+    result: str | None,
+    date_from: str | None,
+    date_to: str | None,
+    limit: int,
+) -> tuple[AuditLedger, list[dict[str, Any]]]:
+    ledger = audit_ledger()
+    start = f"{date_from}T00:00:00+00:00" if date_from and len(date_from) == 10 else date_from
+    end = f"{date_to}T23:59:59+00:00" if date_to and len(date_to) == 10 else date_to
+    try:
+        entries = ledger.query(
+            host=host,
+            action=action,
+            result=result,
+            date_from=start,
+            date_to=end,
+            limit=limit,
+        )
+    except (ValueError, AuditIntegrityError) as exc:
+        raise HTTPException(422, f"Invalid audit query: {exc}") from exc
+    return ledger, entries
+
+
 @app.get("/api/audit")
-def audit(request: Request) -> dict[str, Any]:
+def audit(
+    request: Request,
+    host: str | None = None,
+    action: str | None = None,
+    result: str | None = None,
+    date_from: str | None = None,
+    date_to: str | None = None,
+    limit: int = 250,
+) -> dict[str, Any]:
     get_session(request)
-    host = active_host()
-    entries = load_json(AUDIT_FILE, [])
-    if host:
-        entries = [item for item in entries if item.get("cluster_host") == host]
-    return {"active_cluster": host, "entries": list(reversed(entries[-100:]))}
+    selected_host = None if host == "*" else (host or active_host())
+    with audit_lock:
+        ledger, entries = audit_query(
+            host=selected_host,
+            action=action,
+            result=result,
+            date_from=date_from,
+            date_to=date_to,
+            limit=limit,
+        )
+        integrity = ledger.verify()
+    return {
+        "active_cluster": active_host(),
+        "selected_host": selected_host,
+        "entries": entries,
+        "integrity": integrity,
+        "settings": ledger.settings(),
+    }
+
+
+@app.get("/api/audit/export")
+def export_audit(
+    request: Request,
+    format: Literal["json", "csv"] = "json",
+    host: str | None = None,
+    action: str | None = None,
+    result: str | None = None,
+    date_from: str | None = None,
+    date_to: str | None = None,
+) -> Response:
+    get_session(request)
+    selected_host = None if host == "*" else (host or active_host())
+    with audit_lock:
+        ledger, entries = audit_query(
+            host=selected_host,
+            action=action,
+            result=result,
+            date_from=date_from,
+            date_to=date_to,
+            limit=5000,
+        )
+        integrity = ledger.verify()
+    stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
+    if format == "json":
+        content = json.dumps(
+            {
+                "exported_at": utc_now(),
+                "filters": {
+                    "host": selected_host,
+                    "action": action,
+                    "result": result,
+                    "date_from": date_from,
+                    "date_to": date_to,
+                },
+                "integrity": integrity,
+                "entries": entries,
+            },
+            indent=2,
+        )
+        return Response(
+            content,
+            media_type="application/json",
+            headers={
+                "Content-Disposition": f'attachment; filename="nutanix-stig-audit-{stamp}.json"'
+            },
+        )
+    output = io.StringIO()
+    writer = csv.DictWriter(
+        output,
+        fieldnames=[
+            "sequence",
+            "timestamp",
+            "actor_id",
+            "source",
+            "action",
+            "target_host",
+            "result",
+            "details",
+            "previous_hash",
+            "entry_hash",
+        ],
+    )
+    writer.writeheader()
+    for entry in entries:
+        writer.writerow(
+            {
+                **{key: entry.get(key) for key in writer.fieldnames if key != "details"},
+                "details": json.dumps(entry.get("details") or {}, sort_keys=True),
+            }
+        )
+    return Response(
+        output.getvalue(),
+        media_type="text/csv",
+        headers={
+            "Content-Disposition": f'attachment; filename="nutanix-stig-audit-{stamp}.csv"'
+        },
+    )
+
+
+@app.get("/api/audit/settings")
+def get_audit_settings(request: Request) -> dict[str, Any]:
+    get_session(request)
+    with audit_lock:
+        ledger = audit_ledger()
+        return {"settings": ledger.settings(), "integrity": ledger.verify()}
+
+
+@app.post("/api/audit/settings")
+@audited_failures("audit.settings_updated", lambda *_, **__: active_host())
+def update_audit_settings(
+    payload: AuditSettingsUpdate,
+    session_info: tuple[str, dict[str, Any]] = Depends(require_csrf),
+) -> dict[str, Any]:
+    sid, _ = session_info
+    with audit_lock:
+        ledger = audit_ledger()
+        integrity = ledger.verify()
+        if not integrity["ok"]:
+            raise HTTPException(409, "Repair or preserve the audit ledger before changing settings.")
+        previous = ledger.settings()
+        settings = ledger.update_settings(payload.retention_days, payload.rotation)
+        append_audit_event(
+            actor=actor_id(sid),
+            source="web",
+            action="audit.settings_updated",
+            target_host=active_host(),
+            result="succeeded",
+            details={"previous": previous, "current": settings},
+        )
+    return {"settings": settings, "integrity": audit_ledger().verify()}
 
 
 @app.get("/api/manual-controls")
@@ -1158,10 +1684,12 @@ def manual_controls(request: Request) -> dict[str, Any]:
 
 
 @app.post("/api/manual-controls")
+@audited_failures("manual_control.updated", lambda *_, **__: active_host())
 def update_manual_control(
     payload: ManualUpdate,
-    _: tuple[str, dict[str, Any]] = Depends(require_csrf),
+    session_info: tuple[str, dict[str, Any]] = Depends(require_csrf),
 ) -> dict[str, Any]:
+    sid, _ = session_info
     if payload.index >= len(MANUAL_CONTROLS):
         raise HTTPException(404, "Manual control not found.")
     if not active_host():
@@ -1174,17 +1702,39 @@ def update_manual_control(
         "updated_at": utc_now(),
     }
     write_state(state)
+    append_audit_event(
+        actor=actor_id(sid),
+        source="web",
+        action="manual_control.updated",
+        target_host=active_host(),
+        result="succeeded",
+        details={
+            "control_index": payload.index,
+            "status": payload.status,
+            "note_present": bool(payload.note.strip()),
+        },
+    )
     return {"saved": True}
 
 
 @app.post("/api/context/close")
+@audited_failures("cluster_context.closed", lambda *_, **__: active_host())
 def close_context(
     payload: ContextClose,
-    _: tuple[str, dict[str, Any]] = Depends(require_csrf),
+    session_info: tuple[str, dict[str, Any]] = Depends(require_csrf),
 ) -> dict[str, Any]:
     global current_job_id
+    sid, _ = session_info
     host = active_host()
     if not host:
+        append_audit_event(
+            actor=actor_id(sid),
+            source="web",
+            action="cluster_context.closed",
+            target_host=None,
+            result="no_op",
+            details={"reason": "no_active_cluster"},
+        )
         return {"closed": True}
     if current_job_id and jobs.get(current_job_id, {}).get("status") == "running":
         raise HTTPException(409, "Wait for the active operation to finish.")
@@ -1200,6 +1750,14 @@ def close_context(
         }
     )
     current_job_id = None
+    append_audit_event(
+        actor=actor_id(sid),
+        source="web",
+        action="cluster_context.closed",
+        target_host=host,
+        result="succeeded",
+        details={"evidence_preserved": True},
+    )
     return {
         "closed": True,
         "archived_cluster": host,

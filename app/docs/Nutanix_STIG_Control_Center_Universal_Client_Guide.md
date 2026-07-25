@@ -293,6 +293,33 @@ Track the remaining controls, owner, evidence reference, and status in the
 Audit page. Download final evidence, then use **Close workspace** before
 selecting another cluster. Closing preserves prior evidence.
 
+### 9. Audit ledger
+
+The Audit page records security-relevant actions rather than keyboard input.
+It never records literal keystrokes, passwords, private keys, passphrases, API
+keys, session cookies, request tokens, or typed confirmation phrases.
+
+Each entry includes a pseudonymous local-session actor ID, UTC timestamp,
+source, action, target host, result, sequence number, previous-entry hash, and
+entry hash. The ledger covers session creation, host-key inspection and trust,
+SSH and v4 connection tests, configuration activation, operation requests and
+completion, Apply and rollback approvals, rejected actions, manual-control
+updates, audit-setting changes, and workspace closure.
+
+Use the page to filter by target host, action, result, and UTC date range.
+**Export JSON** retains the complete structured entries and integrity result;
+**Export CSV** provides a review-friendly table. A green **Hash chain
+verified** status means the retained entries, sequence, and protected tail
+state agree. Stop security work and preserve `app/data` if the page reports an
+integrity alert.
+
+The default retention is 3,650 days with monthly file rotation. An authorized
+operator can select daily rotation and retention from 365 through 7,300 days.
+Rotation does not discard records. Retention removes only expired, completed
+rotation files and preserves a chain anchor identifying the pruned prefix.
+Each operation evidence ZIP includes the complete retained audit trail for
+that target and a separate integrity/settings report.
+
 ## Start, stop, restart, status, repair, and uninstall
 
 Use only the supervisor page at `http://127.0.0.1:8765` for routine lifecycle
@@ -326,6 +353,12 @@ This includes host trust, active non-secret settings, audit history, manual
 control notes, run reports, rollback manifests, and evidence. Protect this
 folder with workstation access controls, encryption, backup, and approved
 retention.
+
+The audit ledger is under `app/data/audit` as rotated `audit-*.jsonl` files,
+with `chain-state.json`, optional `chain-anchor.json`, and `settings.json`.
+These files form one evidence set; do not edit, truncate, rename, or selectively
+restore them. The first access migrates a legacy `app/data/audit.json` array
+without applying the former 500-entry cap.
 
 The service log is:
 

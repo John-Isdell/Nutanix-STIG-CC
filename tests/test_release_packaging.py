@@ -79,6 +79,7 @@ class ReleasePackagingTests(unittest.TestCase):
             for other in set(installers.values()) - {installer}:
                 self.assertNotIn(prefix + other, names)
             self.assertIn(prefix + "LICENSE", names)
+            self.assertIn(prefix + "app/audit_log.py", names)
             self.assertIn(prefix + "app/core/nutanix_stig_harden.py", names)
             self.assertFalse(any("/.runtime/" in name for name in names))
             self.assertFalse(any("/app/data/" in name for name in names))

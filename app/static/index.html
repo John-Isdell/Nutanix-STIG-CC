@@ -314,14 +314,67 @@
 
       <section id="audit" class="panel">
         <div class="section-heading">
-          <div><span class="step-label">Step 5</span><h2>Evidence, audit, and next steps</h2></div>
-          <p>Download the evidence package after every run. Track manual controls here; completion status is local to the active cluster workspace.</p>
+          <div><span class="step-label">Step 5</span><h2>Audit Log, evidence, and next steps</h2></div>
+          <p>Every security-relevant action is stored in an append-only, hash-chained local ledger. Search or export the active engagement, then track controls that remain manual.</p>
+        </div>
+        <div class="audit-filters">
+          <label>Target host
+            <input id="audit-host" placeholder="Active cluster">
+          </label>
+          <label class="check audit-all-hosts">
+            <input id="audit-all-hosts" type="checkbox">
+            <span>Show all hosts and local events</span>
+          </label>
+          <label>Action contains
+            <input id="audit-action" placeholder="operation, approval, connection">
+          </label>
+          <label>Result
+            <select id="audit-result">
+              <option value="">All results</option>
+              <option value="succeeded">Succeeded</option>
+              <option value="accepted">Accepted</option>
+              <option value="approved">Approved</option>
+              <option value="failed">Failed</option>
+              <option value="denied">Denied</option>
+              <option value="no_op">No active target</option>
+            </select>
+          </label>
+          <label>From (UTC)
+            <input id="audit-from" type="date">
+          </label>
+          <label>Through (UTC)
+            <input id="audit-to" type="date">
+          </label>
         </div>
         <div class="audit-toolbar">
-          <button class="secondary" id="refresh-audit" type="button">Refresh audit</button>
-          <span id="audit-summary">No operations yet.</span>
+          <button class="primary" id="search-audit" type="button">Search audit</button>
+          <button class="secondary" id="reset-audit" type="button">Reset</button>
+          <button class="secondary" id="refresh-audit" type="button">Refresh</button>
+          <a class="button secondary" id="export-audit-json" href="/api/audit/export?format=json">Export JSON</a>
+          <a class="button secondary" id="export-audit-csv" href="/api/audit/export?format=csv">Export CSV</a>
+        </div>
+        <div class="audit-status">
+          <span id="audit-summary">No audit events yet.</span>
+          <span id="audit-integrity" class="integrity pending">Integrity not checked</span>
         </div>
         <div id="audit-list" class="audit-list"></div>
+
+        <details class="audit-settings">
+          <summary>Audit retention and rotation</summary>
+          <p>Rotation changes files, not records. Retention never permits less than one year; the default is ten years.</p>
+          <div class="audit-setting-fields">
+            <label>Retain for days
+              <input id="audit-retention-days" type="number" min="365" max="7300" value="3650">
+            </label>
+            <label>Rotate ledger
+              <select id="audit-rotation">
+                <option value="monthly">Monthly</option>
+                <option value="daily">Daily</option>
+              </select>
+            </label>
+            <button class="secondary" id="save-audit-settings" type="button">Save audit settings</button>
+          </div>
+        </details>
 
         <h3 class="subheading">Manual and externally validated controls</h3>
         <div id="manual-controls" class="manual-list"></div>

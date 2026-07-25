@@ -3,6 +3,7 @@ import sys
 import tempfile
 import time
 import unittest
+import zipfile
 from pathlib import Path
 
 WORK_DIR = Path(__file__).parent
@@ -68,7 +69,6 @@ class ControlCenterEngineIntegrationTest(unittest.TestCase):
             server.RUNS_DIR.mkdir()
             server.KNOWN_HOSTS = data_dir / "known_hosts"
             server.STATE_FILE = data_dir / "state.json"
-            server.AUDIT_FILE = data_dir / "audit.json"
             server.jobs.clear()
             server.current_job_id = None
 
@@ -92,6 +92,12 @@ class ControlCenterEngineIntegrationTest(unittest.TestCase):
             )
             evidence = server.RUNS_DIR / job["id"] / completed["evidence_file"]
             self.assertTrue(evidence.is_file())
+            with zipfile.ZipFile(evidence) as archive:
+                self.assertIn("control-center/audit-trail.jsonl", archive.namelist())
+                self.assertIn("control-center/audit-integrity.json", archive.namelist())
+                audit_trail = archive.read("control-center/audit-trail.jsonl").decode()
+                self.assertIn('"action": "operation.completed"', audit_trail)
+                self.assertIn('"action": "operation.requested"', audit_trail)
             operation = server.RUNS_DIR / job["id"] / "operation.json"
             self.assertNotIn(
                 "operation-api-key-must-be-cleared",
@@ -107,7 +113,6 @@ class ControlCenterEngineIntegrationTest(unittest.TestCase):
             server.RUNS_DIR.mkdir()
             server.KNOWN_HOSTS = data_dir / "known_hosts"
             server.STATE_FILE = data_dir / "state.json"
-            server.AUDIT_FILE = data_dir / "audit.json"
             server.jobs.clear()
             server.current_job_id = None
 

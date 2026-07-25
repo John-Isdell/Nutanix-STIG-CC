@@ -22,7 +22,6 @@ class ControlCenterSafetyTests(unittest.TestCase):
         server.KNOWN_HOSTS = data / "known_hosts"
         server.KNOWN_HOSTS.touch()
         server.STATE_FILE = data / "state.json"
-        server.AUDIT_FILE = data / "audit.json"
         server.sessions.clear()
         server.jobs.clear()
         server.pending_host_keys.clear()
@@ -97,6 +96,77 @@ class ControlCenterSafetyTests(unittest.TestCase):
         self.assertNotIn("api-key-never-persist", saved)
         state = json.loads(saved)
         self.assertFalse(state["active_cluster"]["credentials_saved"])
+        audit_text = "\n".join(
+            path.read_text(encoding="utf-8")
+            for path in (server.DATA_DIR / "audit").glob("audit-*.jsonl")
+        )
+        self.assertNotIn("never-persist-this", audit_text)
+        self.assertNotIn("also-never-persist", audit_text)
+        self.assertNotIn("api-key-never-persist", audit_text)
+
+    def test_audit_api_filters_exports_and_reports_integrity(self):
+        response = self.post("/api/configuration/activate", self.payload())
+        self.assertEqual(response.status_code, 200, response.text)
+        filtered = self.client.get(
+            "/api/audit",
+            params={
+                "host": self.payload()["cluster_host"],
+                "action": "configuration",
+                "result": "succeeded",
+            },
+        )
+        self.assertEqual(filtered.status_code, 200, filtered.text)
+        body = filtered.json()
+        self.assertTrue(body["integrity"]["ok"])
+        self.assertEqual(len(body["entries"]), 1)
+        self.assertEqual(body["entries"][0]["action"], "configuration.activated")
+
+        json_export = self.client.get(
+            "/api/audit/export",
+            params={"format": "json", "host": self.payload()["cluster_host"]},
+        )
+        self.assertEqual(json_export.status_code, 200)
+        self.assertIn("attachment;", json_export.headers["content-disposition"])
+        self.assertTrue(json_export.json()["integrity"]["ok"])
+
+        csv_export = self.client.get(
+            "/api/audit/export",
+            params={"format": "csv", "host": self.payload()["cluster_host"]},
+        )
+        self.assertEqual(csv_export.status_code, 200)
+        self.assertIn("configuration.activated", csv_export.text)
+
+    def test_audit_settings_are_operator_configurable_and_audited(self):
+        response = self.post(
+            "/api/audit/settings",
+            {"retention_days": 730, "rotation": "daily"},
+        )
+        self.assertEqual(response.status_code, 200, response.text)
+        self.assertEqual(
+            response.json()["settings"],
+            {"retention_days": 730, "rotation": "daily"},
+        )
+        audit = self.client.get("/api/audit", params={"action": "audit.settings"})
+        self.assertEqual(audit.status_code, 200)
+        self.assertEqual(audit.json()["entries"][0]["action"], "audit.settings_updated")
+
+    def test_tampered_audit_ledger_locks_security_actions(self):
+        ledger_file = next((server.DATA_DIR / "audit").glob("audit-*.jsonl"))
+        entry = json.loads(ledger_file.read_text(encoding="utf-8").splitlines()[0])
+        entry["details"]["local_only"] = False
+        ledger_file.write_text(json.dumps(entry) + "\n", encoding="utf-8")
+
+        audit = self.client.get("/api/audit", params={"host": "*"})
+        self.assertEqual(audit.status_code, 200)
+        self.assertFalse(audit.json()["integrity"]["ok"])
+
+        response = self.post("/api/configuration/activate", self.payload())
+        self.assertEqual(response.status_code, 503)
+        self.assertFalse(server.STATE_FILE.exists())
+        server.sessions.clear()
+        restarted = self.client.get("/api/bootstrap")
+        self.assertEqual(restarted.status_code, 200)
+        self.assertIn("integrity", restarted.json()["audit_warning"].lower())
 
     def test_v4_basic_auth_uses_http_basic_without_api_key_header(self):
         captured = {}
@@ -220,6 +290,12 @@ class ControlCenterSafetyTests(unittest.TestCase):
         different["cluster_host"] = "10.40.20.16"
         response = self.post("/api/configuration/activate", different)
         self.assertEqual(response.status_code, 409)
+        denied = self.client.get(
+            "/api/audit",
+            params={"host": "*", "action": "configuration", "result": "denied"},
+        ).json()["entries"]
+        self.assertEqual(len(denied), 1)
+        self.assertEqual(denied[0]["target_host"], "10.40.20.16")
 
     def test_apply_requires_matching_successful_gate_and_confirmation(self):
         payload = self.payload()

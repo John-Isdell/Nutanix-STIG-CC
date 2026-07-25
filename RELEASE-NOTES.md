@@ -1,3 +1,20 @@
+# Unreleased
+
+- Replaced the capped, rewriteable 500-entry audit array with append-only,
+  daily/monthly rotated JSON Lines and configurable 365-to-7,300-day retention.
+- Added per-entry sequence numbers, previous-entry and entry SHA-256 hashes,
+  chain-tail verification, retention anchors, secret redaction, and legacy
+  audit migration.
+- Added action auditing for sessions, host trust, connection tests,
+  configuration, operation requests/completion, Apply and rollback approvals,
+  rejected actions, manual-control changes, settings, and workspace closure.
+- Added host/action/result/date filters, JSON and CSV export, visible integrity
+  status, and audit settings to the local web interface.
+- Added the complete retained target audit trail and integrity/settings report
+  to every operation evidence ZIP.
+- Audit records actions and outcomes only; literal keystrokes, credentials,
+  request tokens, and typed confirmation phrases are not logged.
+
 # Nutanix STIG Control Center 1.2.0 — Supervisor Edition
 
 Release date: July 24, 2026
