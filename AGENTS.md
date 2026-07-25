@@ -17,6 +17,28 @@ containers required at runtime. Goal: be genuinely useful to the wider
 Nutanix community — secure by default, simple to install, and easy to keep
 current as Nutanix ships new AOS/AHV/Prism Central versions.
 
+## Trademark and non-affiliation notice (required, do not weaken)
+
+This project is **not** created, reviewed, distributed, endorsed, or
+sponsored by Nutanix, Inc. "Nutanix," "AHV," "Prism," "Prism Central," "NCC,"
+and other referenced product/service names are trademarks of Nutanix, Inc.,
+used here only descriptively to identify what this tool interoperates with.
+
+- The canonical notice text lives in `NOTICE.md` at the repo root. Every
+  other file quotes or links it — never restate it in different wording,
+  since inconsistent phrasing is itself a risk here.
+- `README.md` must carry the short one-line form near the very top, above
+  the fold, not buried in a footer.
+- `CLIENT-GUIDE.md`, `app/docs/Nutanix_STIG_Hardening_Client_Execution_Guide.docx`,
+  and `app/docs/Nutanix_Security_Guide_7.5_Control_Crosswalk.md` must each
+  carry the full notice near the top — these are the documents most likely
+  to be handed to a client or auditor and mistaken for Nutanix-authored
+  material.
+- Any new user-facing document must carry the notice before being merged.
+- Never remove, soften, or reword this notice, and never write copy
+  elsewhere (marketing language, PR descriptions, commit messages) that
+  could read as Nutanix affiliation or endorsement.
+
 ## Repo map
 
 - `app/core/nutanix_stig_harden.py` — the hardening/audit engine: `PROFILES`
@@ -52,6 +74,41 @@ the versioning convention used across CNCF-hosted projects. It is tracked in
 `control_center.VERSION`, `README.md`, and `RELEASE-NOTES.md`, and tagged as
 `vMAJOR.MINOR.PATCH`.
 
+**Current state, so agents don't repeat a known mistake:** `.github/workflows/release.yml`
+already exists and works, but it is a `push: tags: "v*"` trigger — it only
+runs when a matching tag is pushed to GitHub. As of this writing the repo has
+**zero tags**, so it has never run once. Running
+`python scripts/build_release.py` locally, or in CI on a normal PR, only
+*validates* that the build works — it does not publish anything, does not
+create a Release, and gives the README nothing to link to. Do not report a
+release task as complete until a tag has actually been pushed and a Release
+with all three archives is visible on GitHub.
+
+**One-time human prerequisite (an agent cannot do this step):** `release.yml`
+hard-fails unless the repository variable `DOCS_COPYRIGHT_REVIEWED` is set to
+`true`. A human repository owner sets this, after completing
+`PUBLIC-RELEASE-CHECKLIST.md`'s bundled-document review, at Settings →
+Secrets and variables → Actions → Variables. If it isn't set yet, tell the
+human that directly instead of trying to work around it.
+
+**To actually cut a release, in order:**
+1. Bump `control_center.VERSION`, move `RELEASE-NOTES.md`'s `# Unreleased`
+   items into a new numbered section, and open this as its own PR.
+2. Once that PR is merged to `main`, tag the merge commit and push the tag —
+   this is the step that was skipped before:
+   ```bash
+   git checkout main && git pull
+   git tag -a vX.Y.Z -m "Nutanix STIG Control Center vX.Y.Z"
+   git push origin vX.Y.Z
+   ```
+3. Confirm, via the Actions tab or `gh run list --workflow=release.yml`, that
+   the run succeeded, and confirm the tag's Release page actually lists the
+   Windows/macOS/Linux archives and `SHA256SUMS.txt`.
+4. Only after step 3 is verified, open a second PR updating `README.md` to
+   link downloads to `https://github.com/John-Isdell/Nutanix-STIG-CC/releases/latest`
+   (this URL always resolves to the newest release, so it never needs a
+   per-release edit). Merge it.
+
 - Bump **patch** for fixes with no behavior change to the public
   install/CLI/API surface, **minor** for backward-compatible additions,
   **major** for anything an existing operator's install/scripts/automation
@@ -59,25 +116,15 @@ the versioning convention used across CNCF-hosted projects. It is tracked in
 - Use Conventional Commits (`fix:`, `feat:`, `feat!:`/`BREAKING CHANGE:`) in
   commit messages and PR titles so the version bump can be computed
   automatically instead of guessed.
-- **Every PR merged to `main`** must trigger the existing CI (lint + tests)
-  **and** a build of the three platform archives
-  (`scripts/build_release.py`) so a working Windows/macOS/Linux package is
-  produced from every merge, not just from a manually pushed tag. On a
-  normal feature/fix merge, publish these as CI/workflow build artifacts.
-  A dedicated, deliberate version-bump PR (bot-authored or maintainer-authored,
-  e.g. a `release-please`-style flow) is what advances
-  `control_center.VERSION`, moves `RELEASE-NOTES.md`'s `# Unreleased` section
-  into a numbered release, creates the `vX.Y.Z` tag, and turns that merge's
-  archives into a real, checksummed GitHub Release.
-- **Non-negotiable:** the existing `PUBLIC-RELEASE-CHECKLIST.md` gate —
-  publication fails closed until a human sets the `DOCS_COPYRIGHT_REVIEWED`
-  repository variable to `true` — must keep applying to every published
-  GitHub Release, no matter how frequently releases are cut. Increasing
-  release frequency must never become a way to quietly bypass that human
-  review.
-- `README.md` must link to `https://github.com/John-Isdell/Nutanix-STIG-CC/releases/latest`
-  for downloads (that URL always resolves to the newest release, so it never
-  needs a per-release edit) rather than a version-specific link.
+- Longer term, every PR merged to `main` should still trigger CI (lint +
+  tests) and a validation build of the three platform archives as workflow
+  artifacts, so a working package is proven on every merge — but only a
+  pushed tag turns that into a real, checksummed GitHub Release, per the
+  steps above.
+- **Non-negotiable:** the `DOCS_COPYRIGHT_REVIEWED` gate must keep applying
+  to every published Release, no matter how frequently releases are cut.
+  Increasing release frequency must never become a way to quietly bypass
+  that human review, and an agent must never set that variable itself.
 
 ## Keeping pace with new AOS, AHV, and Prism Central versions
 
@@ -114,6 +161,11 @@ first-class task, not a one-time effort:
 - Never commit or push directly to `main`. Create a branch, open a PR, and
   wait for human review/merge — this applies to every task, release
   automation included.
+- A task involving a package, release, or README link is not done when a
+  local command exits successfully. It is done when you have confirmed,
+  directly on GitHub (Actions run status, the Release page, or the merged
+  file), that the artifact/link actually exists there. State that
+  confirmation explicitly when reporting the task as complete.
 - Keep each PR focused on one reviewable change (see `CONTRIBUTING.md`).
 - Include the exact validation commands you ran and their results in the PR
   description.
