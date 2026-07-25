@@ -22,6 +22,13 @@ Release date: July 24, 2026
 - Added Dependabot version monitoring, contribution guidance, issue and pull
   request templates, a code of conduct, and a mandatory human copyright review
   gate for bundled documents.
+- Cross-referenced the Nutanix Security Guide 7.5 AHV, CVM, and PCVM
+  hardening sections in the client guide.
+- Added release-discovered AHV iTLB Multihit, Retbleed, and memory-poison
+  mitigations to the high-assurance profiles.
+- Moved DoDIN additional account-lock behavior and fapolicy to explicit manual
+  controls, and documented security Lock Status, SSH restrictions, banner
+  content, and the AOS 7.5/AHV 11.0 STIG boundary.
 
 ## Portability boundary
 

@@ -278,10 +278,56 @@ Supervisor state and registration records are:
 - Manual-control tracking.
 - Optional read-only Nutanix v4.2 cluster identity.
 
+## Nutanix Security Guide 7.5 control coverage
+
+The following cross-reference is based on the Nutanix Security Guide 7.5
+sections for [AHV Security Hardening][ahv75], [CVM Security Hardening][cvm75],
+and [PCVM Security Hardening][pcvm75]. The target's own
+`ncli ... help` output remains authoritative for the installed release. An
+automated profile skips and reports any parameter the target does not
+advertise.
+
+| Guide control | Scope | Control Center treatment | Source section |
+|---|---|---|---|
+| AIDE | AHV, CVM, PCVM | Enabled by STIG Standard, STIG High, and DoDIN APL when supported. | [AHV][ahv75], [CVM][cvm75], [PCVM][pcvm75] |
+| User and kernel core dumps | AHV, CVM, PCVM | Disabled by automated profiles to reduce sensitive dump exposure. A Nutanix Support debugging exception must be handled manually. | [AHV][ahv75], [CVM][cvm75], [PCVM][pcvm75] |
+| High-strength password policy | AHV, CVM, PCVM | Enabled by automated profiles. Recovery and service-account effects still require client validation. | [AHV][ahv75], [CVM][cvm75], [PCVM][pcvm75] |
+| SSH banner parameter | AHV, CVM, PCVM | The parameter is enabled automatically. Banner-file content must be customized and verified manually on every applicable host or VM. | [AHV][ahv75], [CVM][cvm75], [PCVM][pcvm75] |
+| iTLB Multihit mitigation | AHV | Enabled by STIG High and DoDIN APL when advertised; performance acceptance remains a client decision. | [AHV][ahv75] |
+| Retbleed mitigation | AHV | Enabled by STIG High and DoDIN APL when advertised; performance acceptance remains a client decision. | [AHV][ahv75] |
+| Memory poison | AHV | Enabled by STIG High and DoDIN APL when advertised. | [AHV][ahv75] |
+| Page poison | CVM, PCVM | Enabled by STIG High and DoDIN APL when advertised. | [CVM][cvm75], [PCVM][pcvm75] |
+| Slub debug | CVM, PCVM | Enabled by STIG High and DoDIN APL when advertised; performance must be validated. | [CVM][cvm75], [PCVM][pcvm75] |
+| Processor mitigations | CVM, PCVM | Enabled by STIG High and DoDIN APL when advertised; release-specific aliases are discovered at runtime. | [CVM][cvm75], [PCVM][pcvm75] |
+| SSH security level, IP restriction, and SSH allowlist | CVM and supported PCVM releases | Manual only. Stage the smallest required allowlist and test console recovery before restricting access. | [CVM][cvm75], [PCVM][pcvm75] |
+| DoDIN additional controls | CVM, PCVM | Manual only. The guide states that this mode can permanently lock an account after an incorrect password, so it is not sent by an unattended profile. | [CVM][cvm75], [PCVM][pcvm75] |
+| fapolicy | AHV, CVM, PCVM | Manual only. Enable solely under an approved organization policy after workload compatibility and performance testing. | [AHV][ahv75], [CVM][cvm75], [PCVM][pcvm75] |
+| Security-configuration Lock Status | CVM, PCVM | Manual finalization only. Enabling this setting requires Nutanix Support to unlock it. | [CVM][cvm75], [PCVM][pcvm75] |
+| Enable user core dump field | AHV | Manual disposition. The 7.5 AHV section shows this field in configuration output but does not define a hardening command, so the Control Center records the raw value and does not guess. | [AHV][ahv75] |
+
+The AHV guide also states that AOS 7.5 with AHV 11.0 uses a RHEL 9-based
+hypervisor that does not currently meet the RHEL 9 STIG, while the AOS 7.5 CVM
+remains RHEL 8-based. The Control Center cannot remove that product-level
+boundary. For strict STIG requirements, the platform owner must select a
+vendor-supported release combination accepted by the authorizing official.
+
+[ahv75]: https://portal.nutanix.com/page/documents/details?targetId=Nutanix-Security-Guide-v7_5:sec-ahv-configuration-c.html
+[cvm75]: https://portal.nutanix.com/page/documents/details?targetId=Nutanix-Security-Guide-v7_5:sec-controller-virtual-machine-t.html
+[pcvm75]: https://portal.nutanix.com/page/documents/details?targetId=Nutanix-Security-Guide-v7_5:sec-pcvm-configuration-c.html
+
 ## What remains manual
 
 - Cluster lockdown and tested key-only recovery.
+- Release eligibility for the required STIG baseline, including the documented
+  AOS 7.5/AHV 11.0 RHEL 9 limitation.
 - Credential rotation, vaulting, and break-glass validation.
+- SSH banner-file content and per-node visual verification.
+- SSH security levels, IP restrictions, minimal allowlists, and console
+  recovery.
+- DoDIN additional account-lock behavior, fapolicy, and final
+  security-configuration Lock Status.
+- The AHV `Enable user core dump` field when advertised, until the installed
+  release's authoritative command reference defines an approved treatment.
 - LDAPS, least-privilege RBAC, CAC/PIV, revocation, and identity policy.
 - PKI issuance and certificate replacement.
 - KMS/encryption decisions and escrow.

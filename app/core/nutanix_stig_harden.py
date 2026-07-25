@@ -95,6 +95,21 @@ MANUAL_CONTROLS = [
     "Validate management-network segmentation, upstream ACLs, and Flow policies.",
     "Confirm syslog events arrive at the SIEM with correct time, severity, and retention.",
     "Run NCC, functional regression, evidence-package, POA&M, and ISSO sign-off activities.",
+    "Customize and verify the SSH DoD banner files on every AHV, CVM, and PCVM "
+    "before enabling the banner parameter.",
+    "Confirm the installed AOS/AHV release is eligible for the required STIG "
+    "baseline and document any vendor-stated compliance limitation.",
+    "Approve and stage CVM/PCVM SSH security levels, IP restrictions, and minimal "
+    "allowlists with tested console recovery before activation.",
+    "Keep security-configuration Lock Status disabled until the final reviewed "
+    "configuration is accepted; enabling it requires Nutanix Support to unlock.",
+    "Enable fapolicy only under a strict organization policy after compatibility "
+    "and performance testing.",
+    "Enable DoDIN additional controls only with ISSO approval and tested account "
+    "recovery because an incorrect password can permanently lock the account.",
+    "Review and disposition the AHV Enable user core dump field when advertised; "
+    "the Security Guide 7.5 section lists it but does not define a hardening "
+    "command for the Control Center to send safely.",
 ]
 
 # Each scope maps to its own ncli namespace. Prism Central uses a separate
@@ -158,6 +173,30 @@ PARAMS = {
         "type": "bool",
         "desc": "Standard Mandatory DoD Notice and Consent Banner",
     },
+    "enable_itlb_multihit_mitigation": {
+        "cli": "enable-itlb-multihit-mitigation",
+        "labels": [
+            "enable itlb multihit m",
+            "enable itlb multihit mitigation",
+        ],
+        "type": "bool",
+        "desc": "AHV iTLB Multihit processor vulnerability mitigation",
+    },
+    "enable_retbleed_mitigation": {
+        "cli": "enable-retbleed-mitigation",
+        "labels": [
+            "enable retbleed mitiga",
+            "enable retbleed mitigation",
+        ],
+        "type": "bool",
+        "desc": "AHV Retbleed speculative-execution mitigation",
+    },
+    "enable_memory_poison": {
+        "cli": "enable-memory-poison",
+        "labels": ["enable memory poison"],
+        "type": "bool",
+        "desc": "AHV freed-memory poisoning",
+    },
     "enable_page_poison": {
         "cli": "enable-page-poison",
         "labels": ["enable page poison"],
@@ -196,6 +235,7 @@ PARAMS = {
         "cli_aliases": [
             "enable-dodin-additional-controls",
             "enable-dodin-mode",
+            "enable-dodin-opts",
         ],
         "labels": [
             "enable dodin additiona",
@@ -243,7 +283,9 @@ PROFILES = {
         "enable_page_poison": True,
         "enable_slub_debug": True,
         "enable_processor_mitigations": True,
-        "enable_fapolicy": True,
+        "enable_itlb_multihit_mitigation": True,
+        "enable_retbleed_mitigation": True,
+        "enable_memory_poison": True,
         "enable_snmpv3_only": True,
     },
     "DODIN_APL": {
@@ -256,17 +298,20 @@ PROFILES = {
         "enable_page_poison": True,
         "enable_slub_debug": True,
         "enable_processor_mitigations": True,
-        "enable_fapolicy": True,
+        "enable_itlb_multihit_mitigation": True,
+        "enable_retbleed_mitigation": True,
+        "enable_memory_poison": True,
         "enable_snmpv3_only": True,
-        "enable_dodin_additional_controls": True,
     },
 }
 
 PROFILE_NOTES = {
     "REPORT_ONLY": "Capture baseline and report drift. Makes no changes.",
     "STIG_STANDARD": "Core STIG controls with minimal performance impact.",
-    "STIG_HIGH": "Adds memory protections, processor mitigations, and fapolicy.",
-    "DODIN_APL": "STIG_HIGH plus DoDIN APL additional controls and hourly SCMA.",
+    "STIG_HIGH": "Adds release-supported memory and processor mitigations.",
+    "DODIN_APL": (
+        "STIG_HIGH plus hourly SCMA; lockout-prone DoDIN options remain manual."
+    ),
 }
 
 SAMPLE_CONFIG = """\
@@ -672,6 +717,21 @@ def discover_supported_params(session, scope):
 # Preflight validation
 # ---------------------------------------------------------------------------
 
+def platform_stig_advisories(version, scopes, target_type):
+    """Return non-blocking product-version compliance advisories."""
+    if (
+        target_type == "cluster"
+        and "ahv" in scopes
+        and re.match(r"^7\.5(?:\.|$)", version or "")
+    ):
+        return [
+            "AOS 7.5 with AHV scope detected. Confirm the AHV release and "
+            "document the Nutanix Security Guide 7.5 RHEL 9 STIG limitation "
+            "before treating this run as compliance evidence."
+        ]
+    return []
+
+
 def preflight(session, options, console, logger, target_type):
     """
     Validate that the target is safe to modify. Returns (passed, findings).
@@ -710,6 +770,10 @@ def preflight(session, options, console, logger, target_type):
                     break
     if version:
         console.ok("Version: %s" % version)
+        for advisory in platform_stig_advisories(
+            version, options["scopes"], target_type
+        ):
+            add_finding(advisory)
     elif rc == 0:
         add_finding("Unable to determine the AOS or Prism Central version",
                     blocking=True)
