@@ -153,22 +153,48 @@
               <button class="secondary" id="test-pc-connection" type="button">Test PCVM connection</button>
               <span id="pc-connection-status" class="inline-status">Not tested</span>
             </div>
-            <label class="toggle"><input id="api-enabled" type="checkbox"><span></span>Verify cluster identity with Nutanix v4.2 (read-only)</label>
+            <label class="toggle"><input id="api-enabled" type="checkbox"><span></span>Verify cluster identity with the Nutanix v4.2 API (read-only)</label>
             <div id="api-fields" class="hidden">
-              <div class="form-grid three">
-                <label>Prism API address
-                  <input id="api-host" autocomplete="off" placeholder="Prism Element or Central">
+              <div class="api-auth-help">
+                <strong>Prism Central API-key requirements</strong>
+                <p>API-key authentication requires Prism Central pc.2024.3 or later with supported AOS 7.0+ clusters. Older Prism Central releases use Username/Password. Nutanix does not provide Prism Central UI controls for creating these service-account keys.</p>
+                <ol>
+                  <li>Create a dedicated service account with <code>POST /api/iam/v4.0/authn/users</code> and <code>userType: SERVICE_ACCOUNT</code>.</li>
+                  <li>Create its API key with <code>POST /api/iam/v4.0/authn/users/{extId}/keys</code>.</li>
+                  <li><strong>Save the generated key immediately.</strong> Its secret is returned once and cannot be retrieved later.</li>
+                  <li>Grant the service account the least-privilege cluster-view role with <code>POST /api/iam/v4.0/authz/authorization-policies</code>. A key without an authorization policy authenticates but cannot read inventory.</li>
+                  <li>Select API Key below. The Control Center sends it only as <code>X-Ntnx-Api-Key</code> for this read-only check and never saves it.</li>
+                </ol>
+                <p>Account, key, and policy creation are intentionally not automated here because they create persistent IAM objects. See the <a href="/api/docs/universal-guide" target="_blank" rel="noopener">client guide</a> for the complete operator procedure.</p>
+              </div>
+              <div class="choice-row" role="group" aria-label="Prism API authentication method">
+                <label class="choice"><input id="api-auth-basic" type="radio" name="api-auth" value="basic" checked><span>Username / Password</span></label>
+                <label class="choice"><input id="api-auth-key" type="radio" name="api-auth" value="api_key"><span>API Key</span></label>
+              </div>
+              <div class="form-grid two">
+                <label>Prism Central API address
+                  <input id="api-host" autocomplete="off" placeholder="Prism Central IP or DNS">
                 </label>
                 <label>API port
                   <input id="api-port" type="number" value="9440" min="1" max="65535">
                 </label>
+              </div>
+              <div id="api-basic-auth" class="form-grid two">
                 <label>API username
                   <input id="api-username" autocomplete="username">
                 </label>
                 <label>API password
                   <input id="api-password" type="password" autocomplete="current-password">
                 </label>
-                <label class="span-two">Trusted CA bundle, when the Prism certificate is not in system trust
+              </div>
+              <div id="api-key-auth" class="hidden">
+                <label>Prism Central API key
+                  <input id="api-key" type="password" autocomplete="off" spellcheck="false" placeholder="Returned once when the service-account key is created">
+                </label>
+                <p class="field-note">Held only for the current request. It is not written to configuration, logs, audit history, or evidence.</p>
+              </div>
+              <div class="form-grid two">
+                <label>Trusted CA bundle, when the Prism certificate is not in system trust
                   <input id="api-ca-file" type="file" accept=".pem,.crt,.cer">
                 </label>
               </div>

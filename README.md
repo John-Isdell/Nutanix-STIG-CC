@@ -128,8 +128,9 @@ python3 control_center.py stop --force-stop
   state-changing calls.
 - SSH host keys are independently inspected and stored in the application's
   strict `known_hosts` file.
-- Passwords, private keys, passphrases, Prism passwords, and uploaded CA
-  material are not stored in configuration, audit history, or evidence.
+- Passwords, private keys, passphrases, Prism passwords, Prism Central API
+  keys, and uploaded CA material are not stored in configuration, audit
+  history, or evidence.
 - One active cluster workspace and one operation are allowed at a time.
 - Apply requires a matching successful full-health dry run, change ID,
   acknowledgements, and cluster-specific typed confirmation.
@@ -165,8 +166,9 @@ The browser workflow remains:
 
 1. Inspect and independently verify CVM/PCVM SSH host keys.
 2. Test authenticated SSH and nCLI access.
-3. Optionally verify cluster identity through TLS-validated Nutanix
-   Cluster Management v4.2.
+3. Optionally verify cluster identity through TLS-validated Nutanix Cluster
+   Management v4.2 using username/password or a Prism Central pc.2024.3+
+   service-account API key.
 4. Select profile, scopes, full NCC, syslog, and verification settings.
 5. Activate one cluster configuration.
 6. Run dry assessment.
@@ -198,6 +200,11 @@ operation completes with issues, records the exact target error and
 text/JSON/CSV evidence paths, and keeps Apply locked. Apply continues to stop
 on a connection or remote-execution exception unless the client separately
 approves a different safety policy.
+
+Prism Central API-key identity checks use the `X-Ntnx-Api-Key` header. The
+client guide documents the required service-account, one-time key capture, and
+authorization-policy sequence. The Control Center does not create those
+persistent IAM objects.
 
 ## Logs and troubleshooting
 

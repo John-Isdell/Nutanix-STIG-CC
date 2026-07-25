@@ -120,6 +120,7 @@ def sanitize_config(payload: dict[str, Any]) -> dict[str, Any]:
         "pc_private_key",
         "pc_key_passphrase",
         "api_password",
+        "api_key",
         "api_ca_pem",
         "typed_confirmation",
         "approval_id",
@@ -280,8 +281,10 @@ class ClusterPayload(BaseModel):
     api_enabled: bool = False
     api_host: str = ""
     api_port: int = Field(default=9440, ge=1, le=65535)
+    api_auth_method: Literal["basic", "api_key"] = "basic"
     api_username: str = ""
     api_password: str = ""
+    api_key: str = ""
     api_ca_pem: str = ""
     api_cluster_ext_id: str = ""
 
@@ -307,8 +310,10 @@ class ManualUpdate(BaseModel):
 class V4Payload(BaseModel):
     api_host: str
     api_port: int = Field(default=9440, ge=1, le=65535)
-    api_username: str
-    api_password: str
+    api_auth_method: Literal["basic", "api_key"] = "basic"
+    api_username: str = ""
+    api_password: str = ""
+    api_key: str = ""
     api_ca_pem: str = ""
 
 
@@ -543,8 +548,17 @@ def v4_cluster_identity(
     _: tuple[str, dict[str, Any]] = Depends(require_csrf),
 ) -> dict[str, Any]:
     host = validate_host(payload.api_host, "Prism API address")
-    if not payload.api_username or not payload.api_password:
-        raise HTTPException(422, "Prism API username and password are required.")
+    client_auth: tuple[str, str] | None = None
+    client_headers: dict[str, str] = {}
+    if payload.api_auth_method == "api_key":
+        api_key = payload.api_key.strip()
+        if not api_key:
+            raise HTTPException(422, "Prism Central API key is required.")
+        client_headers["X-Ntnx-Api-Key"] = api_key
+    else:
+        if not payload.api_username or not payload.api_password:
+            raise HTTPException(422, "Prism API username and password are required.")
+        client_auth = (payload.api_username, payload.api_password)
     ca_path: Path | None = None
     verify: str | bool = True
     try:
@@ -553,12 +567,16 @@ def v4_cluster_identity(
             ca_path.write_text(payload.api_ca_pem.strip() + "\n", encoding="utf-8")
             verify = str(ca_path)
         url = f"https://{host}:{payload.api_port}/api/clustermgmt/v4.2/config/clusters"
-        with httpx.Client(
-            verify=verify,
-            timeout=30,
-            auth=(payload.api_username, payload.api_password),
-            follow_redirects=False,
-        ) as client:
+        client_options: dict[str, Any] = {
+            "verify": verify,
+            "timeout": 30,
+            "follow_redirects": False,
+        }
+        if client_auth:
+            client_options["auth"] = client_auth
+        else:
+            client_options["headers"] = client_headers
+        with httpx.Client(**client_options) as client:
             response = client.get(url, params={"$limit": 100})
         if response.status_code >= 400:
             raise HTTPException(
@@ -592,6 +610,7 @@ def v4_cluster_identity(
             "endpoint": f"https://{host}:{payload.api_port}",
             "clusters": inventory,
             "read_only": True,
+            "auth_method": payload.api_auth_method,
             "note": (
                 "The Control Center uses v4 here for identity and inventory only. "
                 "Security-parameter changes remain on the verified SSH/nCLI path."
@@ -879,6 +898,7 @@ def run_engine_job(
             "pc_private_key",
             "pc_key_passphrase",
             "api_password",
+            "api_key",
             "api_ca_pem",
         ):
             data[secret_key] = ""
@@ -914,7 +934,6 @@ def run_engine_job(
     save_json(job_dir / "job-summary.json", job_summary)
     append_audit(job_summary)
     with state_lock:
-        jobs[job_id] = job_summary
         state = active_state()
         if mode == "DRY_RUN":
             if (
@@ -951,6 +970,10 @@ def run_engine_job(
                 "ready": return_code == 0,
             }
         write_state(state)
+        # Publish terminal job status only after its corresponding gate state
+        # is durable so polling clients cannot observe a completed job with
+        # stale Apply or rollback readiness.
+        jobs[job_id] = job_summary
         current_job_id = None
 
 
@@ -1198,6 +1221,7 @@ def capabilities(request: Request) -> dict[str, Any]:
             "Rollback manifests for values changed by the tool",
             "Text, JSON, CSV, console, baseline, post-change, and evidence reports",
             "Optional read-only cluster identity using Nutanix Cluster Management v4.2",
+            "Prism Central API-key authentication using an ephemeral X-Ntnx-Api-Key header",
         ],
         "does_not_automate": [
             {

@@ -3,6 +3,7 @@ import sys
 import tempfile
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 APP_DIR = Path(__file__).parent.parent / "app"
 sys.path.insert(0, str(APP_DIR))
@@ -65,8 +66,10 @@ class ControlCenterSafetyTests(unittest.TestCase):
             "api_enabled": False,
             "api_host": "",
             "api_port": 9440,
+            "api_auth_method": "basic",
             "api_username": "",
             "api_password": "also-never-persist",
+            "api_key": "api-key-never-persist",
             "api_ca_pem": "",
             "api_cluster_ext_id": "",
         }
@@ -91,8 +94,123 @@ class ControlCenterSafetyTests(unittest.TestCase):
         saved = server.STATE_FILE.read_text(encoding="utf-8")
         self.assertNotIn("never-persist-this", saved)
         self.assertNotIn("also-never-persist", saved)
+        self.assertNotIn("api-key-never-persist", saved)
         state = json.loads(saved)
         self.assertFalse(state["active_cluster"]["credentials_saved"])
+
+    def test_v4_basic_auth_uses_http_basic_without_api_key_header(self):
+        captured = {}
+
+        class Response:
+            status_code = 200
+
+            @staticmethod
+            def json():
+                return {"data": [{"name": "Cluster A", "extId": "cluster-a"}]}
+
+        class Client:
+            def __init__(self, **kwargs):
+                captured["options"] = kwargs
+
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *_):
+                return None
+
+            def get(self, url, params):
+                captured["url"] = url
+                captured["params"] = params
+                return Response()
+
+        payload = {
+            "api_host": "pc.example.test",
+            "api_port": 9440,
+            "api_auth_method": "basic",
+            "api_username": "viewer",
+            "api_password": "basic-secret",
+            "api_key": "",
+            "api_ca_pem": "",
+        }
+        with patch.object(server.httpx, "Client", Client):
+            response = self.post("/api/v4/cluster-identity", payload)
+
+        self.assertEqual(response.status_code, 200, response.text)
+        self.assertEqual(captured["options"]["auth"], ("viewer", "basic-secret"))
+        self.assertNotIn("headers", captured["options"])
+        self.assertEqual(response.json()["auth_method"], "basic")
+
+    def test_v4_api_key_uses_only_nutanix_api_key_header(self):
+        captured = {}
+
+        class Response:
+            status_code = 200
+
+            @staticmethod
+            def json():
+                return {"data": [{"name": "Cluster A", "extId": "cluster-a"}]}
+
+        class Client:
+            def __init__(self, **kwargs):
+                captured["options"] = kwargs
+
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *_):
+                return None
+
+            def get(self, url, params):
+                captured["url"] = url
+                captured["params"] = params
+                return Response()
+
+        payload = {
+            "api_host": "pc.example.test",
+            "api_port": 9440,
+            "api_auth_method": "api_key",
+            "api_username": "must-not-be-used",
+            "api_password": "must-not-be-used",
+            "api_key": "one-time-secret",
+            "api_ca_pem": "",
+        }
+        with patch.object(server.httpx, "Client", Client):
+            response = self.post("/api/v4/cluster-identity", payload)
+
+        self.assertEqual(response.status_code, 200, response.text)
+        self.assertEqual(
+            captured["options"]["headers"],
+            {"X-Ntnx-Api-Key": "one-time-secret"},
+        )
+        self.assertNotIn("auth", captured["options"])
+        self.assertEqual(response.json()["auth_method"], "api_key")
+
+    def test_v4_auth_method_requires_only_its_selected_credential(self):
+        missing_key = self.post(
+            "/api/v4/cluster-identity",
+            {
+                "api_host": "pc.example.test",
+                "api_auth_method": "api_key",
+                "api_username": "unused",
+                "api_password": "unused",
+                "api_key": "",
+            },
+        )
+        self.assertEqual(missing_key.status_code, 422)
+        self.assertNotIn("unused", missing_key.text)
+
+        missing_basic = self.post(
+            "/api/v4/cluster-identity",
+            {
+                "api_host": "pc.example.test",
+                "api_auth_method": "basic",
+                "api_username": "",
+                "api_password": "",
+                "api_key": "unused-key",
+            },
+        )
+        self.assertEqual(missing_basic.status_code, 422)
+        self.assertNotIn("unused-key", missing_basic.text)
 
     def test_second_cluster_is_rejected_until_context_is_closed(self):
         self.assertEqual(

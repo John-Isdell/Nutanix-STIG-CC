@@ -34,11 +34,14 @@ the client change evidence.
 Credentials are supplied to the local service for the current test or
 operation. The service passes SSH secrets to the short-lived execution process
 through its environment or a permission-restricted temporary file and deletes
-temporary key/configuration files when the operation finishes.
+temporary key/configuration files when the operation finishes. Prism Central
+API keys are sent only in the `X-Ntnx-Api-Key` request header for the selected
+read-only v4 identity check.
 
 The service log, saved configuration, operation metadata, audit history, and
-evidence packages exclude entered credentials. The operating system and other
-processes running as the same user remain part of the trust boundary.
+evidence packages exclude entered passwords, private keys, passphrases, API
+keys, and uploaded CA material. The operating system and other processes
+running as the same user remain part of the trust boundary.
 
 ## Network exposure
 

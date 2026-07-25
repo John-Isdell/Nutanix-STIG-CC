@@ -52,12 +52,53 @@ function pcAuthMethod() {
   return document.querySelector('input[name="pc-auth"]:checked').value;
 }
 
+function apiAuthMethod() {
+  return document.querySelector('input[name="api-auth"]:checked').value;
+}
+
 function profileName() {
   return document.querySelector('input[name="profile"]:checked').value;
 }
 
+function syncApiAuthFields(clearInactive = false) {
+  const keyAuth = apiAuthMethod() === "api_key";
+  $("api-basic-auth").classList.toggle("hidden", keyAuth);
+  $("api-key-auth").classList.toggle("hidden", !keyAuth);
+  $("api-username").disabled = keyAuth;
+  $("api-password").disabled = keyAuth;
+  $("api-key").disabled = !keyAuth;
+  if (clearInactive) {
+    if (keyAuth) {
+      $("api-password").value = "";
+    } else {
+      $("api-key").value = "";
+    }
+  }
+}
+
+function resetApiVerification() {
+  const resultBox = $("api-result");
+  resultBox.dataset.extId = "";
+  resultBox.replaceChildren();
+  resultBox.classList.add("hidden");
+}
+
+function apiIdentityPayload() {
+  const selectedApiAuth = apiAuthMethod();
+  return {
+    api_host: value("api-host"),
+    api_port: numberValue("api-port"),
+    api_auth_method: selectedApiAuth,
+    api_username: selectedApiAuth === "basic" ? value("api-username") : "",
+    api_password: selectedApiAuth === "basic" ? value("api-password") : "",
+    api_key: selectedApiAuth === "api_key" ? value("api-key") : "",
+    api_ca_pem: apiCaText
+  };
+}
+
 function collectConfig() {
   const scopes = [];
+  const selectedApiAuth = apiAuthMethod();
   if (checked("scope-cvm")) scopes.push("cvm");
   if (checked("scope-ahv")) scopes.push("ahv");
   if (checked("scope-pcvm")) scopes.push("pcvm");
@@ -95,8 +136,10 @@ function collectConfig() {
     api_enabled: checked("api-enabled"),
     api_host: value("api-host"),
     api_port: numberValue("api-port"),
-    api_username: value("api-username"),
-    api_password: value("api-password"),
+    api_auth_method: selectedApiAuth,
+    api_username: selectedApiAuth === "basic" ? value("api-username") : "",
+    api_password: selectedApiAuth === "basic" ? value("api-password") : "",
+    api_key: selectedApiAuth === "api_key" ? value("api-key") : "",
     api_ca_pem: apiCaText,
     api_cluster_ext_id: $("api-result").dataset.extId || ""
   };
@@ -138,6 +181,10 @@ function fillConfig(config) {
   $("api-enabled").checked = Boolean(config.api_enabled);
   $("api-fields").classList.toggle("hidden", !config.api_enabled);
   $("api-result").dataset.extId = config.api_cluster_ext_id || "";
+  document.querySelectorAll('input[name="api-auth"]').forEach((input) => {
+    input.checked = input.value === (config.api_auth_method || "basic");
+  });
+  syncApiAuthFields(false);
   $("pc-same-auth").checked = config.pc_use_same_auth !== false;
   $("pc-auth-fields").classList.toggle("hidden", config.pc_use_same_auth !== false);
   document.querySelectorAll('input[name="pc-auth"]').forEach((input) => {
@@ -328,18 +375,12 @@ async function testV4() {
   try {
     const result = await api("/api/v4/cluster-identity", {
       method: "POST",
-      body: JSON.stringify({
-        api_host: value("api-host"),
-        api_port: numberValue("api-port"),
-        api_username: value("api-username"),
-        api_password: value("api-password"),
-        api_ca_pem: apiCaText
-      })
+      body: JSON.stringify(apiIdentityPayload())
     });
     resultBox.replaceChildren();
     const message = document.createElement("p");
     message.textContent = result.clusters.length
-      ? `v4.2 identity verified for ${result.clusters.length} cluster(s). Read-only inventory; credentials were not saved.`
+      ? `v4.2 identity verified for ${result.clusters.length} cluster(s) using ${result.auth_method === "api_key" ? "an API key" : "username/password"}. Read-only inventory; credentials were not saved.`
       : "v4.2 connected, but no clusters were returned for this account.";
     resultBox.appendChild(message);
     if (result.clusters.length) {
@@ -780,6 +821,7 @@ async function confirmClose(event) {
     $("pc-password").value = "";
     $("pc-key-passphrase").value = "";
     $("api-password").value = "";
+    $("api-key").value = "";
     await bootstrap();
     notify(`${result.archived_cluster} closed. Evidence remains on this workstation.`, "success");
   } catch (error) {
@@ -809,10 +851,20 @@ function wireEvents() {
   }));
   $("api-ca-file").addEventListener("change", async (event) => {
     apiCaText = await fileText(event.target);
+    resetApiVerification();
+  });
+  document.querySelectorAll('input[name="api-auth"]').forEach((input) => {
+    input.addEventListener("change", () => {
+      syncApiAuthFields(true);
+      resetApiVerification();
+    });
   });
   $("api-enabled").addEventListener("change", () => {
     $("api-fields").classList.toggle("hidden", !checked("api-enabled"));
-    if (!value("api-host")) $("api-host").value = value("cluster-host");
+    if (!value("api-host")) $("api-host").value = value("pc-host") || value("cluster-host");
+  });
+  ["api-host", "api-port", "api-username", "api-password", "api-key"].forEach((id) => {
+    $(id).addEventListener("input", resetApiVerification);
   });
   $("syslog-enabled").addEventListener("change", () => {
     $("syslog-fields").classList.toggle("hidden", !checked("syslog-enabled"));
@@ -838,6 +890,7 @@ function wireEvents() {
   $("close-context-button").addEventListener("click", openCloseDialog);
   $("confirm-close").addEventListener("click", confirmClose);
   $("confirm-rollback").addEventListener("click", confirmRollback);
+  syncApiAuthFields(false);
 }
 
 document.addEventListener("DOMContentLoaded", async () => {

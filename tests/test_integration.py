@@ -50,8 +50,10 @@ def operation_payload(
         "api_enabled": False,
         "api_host": "",
         "api_port": 9440,
+        "api_auth_method": "api_key",
         "api_username": "",
         "api_password": "",
+        "api_key": "operation-api-key-must-be-cleared",
         "api_ca_pem": "",
         "api_cluster_ext_id": "",
     }
@@ -90,6 +92,12 @@ class ControlCenterEngineIntegrationTest(unittest.TestCase):
             )
             evidence = server.RUNS_DIR / job["id"] / completed["evidence_file"]
             self.assertTrue(evidence.is_file())
+            operation = server.RUNS_DIR / job["id"] / "operation.json"
+            self.assertNotIn(
+                "operation-api-key-must-be-cleared",
+                operation.read_text(encoding="utf-8"),
+            )
+            self.assertEqual(payload["api_key"], "")
 
     def test_web_job_reports_reachable_cluster_and_unreachable_pcvm(self):
         with tempfile.TemporaryDirectory() as temporary:
