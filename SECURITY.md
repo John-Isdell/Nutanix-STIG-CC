@@ -43,6 +43,28 @@ evidence packages exclude entered passwords, private keys, passphrases, API
 keys, and uploaded CA material. The operating system and other processes
 running as the same user remain part of the trust boundary.
 
+## Audit integrity
+
+Security-relevant actions are appended to rotated JSON Lines files under
+`app/data/audit`. Every entry contains a monotonically increasing sequence,
+the previous-entry SHA-256 hash, and its own hash. A protected tail record
+detects truncation; a retention anchor preserves continuity when expired
+rotation files are removed under the configured policy.
+
+The ledger records actions and outcomes, not literal keystrokes. Typed
+confirmation text, session cookies, request-verification tokens, credentials,
+and credential-bearing request bodies are excluded. Local session actors are
+represented by a one-way, shortened session digest.
+
+Treat the rotated JSONL files, `chain-state.json`, `chain-anchor.json` when
+present, and `settings.json` as one evidence set. Selective restoration,
+renaming, truncation, or editing produces an integrity alert. Preserve the
+entire `app/data` directory and stop security changes if verification fails.
+The hash chain is tamper-evident; it does not protect against an attacker who
+can replace the complete application data set and all backups. Workstation
+access control, encryption, backup, and external evidence retention remain
+required.
+
 ## Network exposure
 
 The always-on supervisor binds only to `127.0.0.1:8765`. It starts the separate

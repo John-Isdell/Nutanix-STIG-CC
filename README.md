@@ -131,6 +131,13 @@ python3 control_center.py stop --force-stop
 - Passwords, private keys, passphrases, Prism passwords, Prism Central API
   keys, and uploaded CA material are not stored in configuration, audit
   history, or evidence.
+- Security-relevant actions are written to rotated, append-only JSON Lines
+  files with sequence numbers and a global SHA-256 hash chain. Literal
+  keystrokes and typed confirmation phrases are never logged.
+- Audit history is searchable by host, action, result, and date, exportable as
+  JSON or CSV, and included with its integrity result in each target's evidence
+  ZIP. The default retention is ten years and the operator-configurable minimum
+  is one year.
 - One active cluster workspace and one operation are allowed at a time.
 - Apply requires a matching successful full-health dry run, change ID,
   acknowledgements, and cluster-specific typed confirmation.
@@ -176,6 +183,8 @@ The browser workflow remains:
 8. Authorize Apply only after the matching dry run passes.
 9. Download evidence and complete manual controls.
 10. Preview and authorize rollback only when required.
+11. Confirm the Audit page reports **Hash chain verified**, export the
+    engagement audit if required, and close the cluster workspace.
 
 ## Important compliance boundary
 
@@ -215,6 +224,7 @@ persistent IAM objects.
 - Controller state: `.runtime/service.json`
 - Private Python environment: `.runtime/venv`
 - Cluster evidence and settings: `app/data`
+- Rotated audit ledger and integrity state: `app/data/audit`
 
 Open `http://127.0.0.1:8765` before a maintenance window. The page reports the
 real dependency, registration, and Control Center process state without

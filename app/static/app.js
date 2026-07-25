@@ -225,6 +225,7 @@ async function bootstrap() {
   bootstrapState = data;
   renderContext();
   await Promise.all([loadCapabilities(), loadAudit(), loadManualControls()]);
+  if (data.audit_warning) notify(data.audit_warning, "error", true);
 }
 
 async function fileText(input) {
@@ -709,49 +710,117 @@ async function loadCapabilities() {
   });
 }
 
+function auditParameters(format = "") {
+  const parameters = new URLSearchParams();
+  if (format) parameters.set("format", format);
+  const filters = {
+    host: checked("audit-all-hosts") ? "*" : value("audit-host"),
+    action: value("audit-action"),
+    result: $("audit-result").value,
+    date_from: value("audit-from"),
+    date_to: value("audit-to")
+  };
+  Object.entries(filters).forEach(([key, item]) => {
+    if (item) parameters.set(key, item);
+  });
+  return parameters;
+}
+
+function auditDetailText(entry) {
+  const details = entry.details || {};
+  const parts = [];
+  if (details.mode) parts.push(String(details.mode).replaceAll("_", " "));
+  if (details.profile) parts.push(details.profile);
+  if (details.scopes && details.scopes.length) parts.push(details.scopes.join(", ").toUpperCase());
+  if (details.job_id) parts.push(`Job ${details.job_id}`);
+  if (details.control_index !== undefined) parts.push(`Control ${Number(details.control_index) + 1}`);
+  if (details.auth_method) parts.push(`${details.auth_method} authentication`);
+  if (details.http_status) parts.push(`HTTP ${details.http_status}`);
+  return parts.join(" · ") || `${entry.source} · ${entry.target_host || "local workstation"}`;
+}
+
 async function loadAudit() {
-  const data = await api("/api/audit");
+  const parameters = auditParameters();
+  const data = await api(`/api/audit?${parameters.toString()}`);
   const list = $("audit-list");
   list.replaceChildren();
   $("audit-summary").textContent = data.entries.length
-    ? `${data.entries.length} operation(s) for ${data.active_cluster}.`
-    : "No operations yet for the active workspace.";
+    ? `${data.entries.length} audit event(s) shown${data.selected_host ? ` for ${data.selected_host}` : ""}.`
+    : "No audit events match these filters.";
+  const integrity = $("audit-integrity");
+  integrity.className = `integrity ${data.integrity.ok ? "ok" : "failed"}`;
+  const entryLabel = data.integrity.entries_checked === 1 ? "entry" : "entries";
+  integrity.textContent = data.integrity.ok
+    ? `Hash chain verified · ${data.integrity.entries_checked} ${entryLabel}`
+    : `Integrity alert · ${(data.integrity.problems || []).join("; ")}`;
+  $("audit-retention-days").value = data.settings.retention_days;
+  $("audit-rotation").value = data.settings.rotation;
+  $("export-audit-json").href = `/api/audit/export?${auditParameters("json").toString()}`;
+  $("export-audit-csv").href = `/api/audit/export?${auditParameters("csv").toString()}`;
   data.entries.forEach((entry) => {
     const row = document.createElement("div");
     row.className = "audit-entry";
     const mode = document.createElement("span");
     mode.className = "mode";
-    mode.textContent = entry.mode.replaceAll("_", " ");
+    mode.textContent = entry.action.replaceAll(".", " ").toUpperCase();
     const detail = document.createElement("div");
     const title = document.createElement("b");
-    title.textContent = `${entry.profile} · ${(entry.scopes || []).join(", ").toUpperCase()}`;
+    title.textContent = auditDetailText(entry);
     const time = document.createElement("small");
-    time.textContent = `${new Date(entry.completed_at).toLocaleString()} · ${entry.id}`;
+    time.textContent = `${new Date(entry.timestamp).toLocaleString()} · #${entry.sequence} · ${entry.actor_id}`;
     detail.append(title, time);
     const right = document.createElement("div");
     const tag = document.createElement("span");
-    tag.className = `tag ${entry.status}`;
-    tag.textContent = entry.status;
+    tag.className = `tag ${entry.result}`;
+    tag.textContent = entry.result;
     right.appendChild(tag);
-    if (entry.evidence_file) {
+    const details = entry.details || {};
+    if (details.evidence_file && details.job_id) {
       const link = document.createElement("a");
-      link.href = `/api/jobs/${entry.id}/evidence`;
+      link.href = `/api/jobs/${details.job_id}/evidence`;
       link.textContent = "Evidence";
       link.className = "audit-link";
       right.appendChild(document.createTextNode(" "));
       right.appendChild(link);
     }
-    if (entry.rollback_manifests && entry.rollback_manifests.length) {
+    if (details.rollback_manifests && details.rollback_manifests.length && details.job_id) {
       const preview = document.createElement("button");
       preview.type = "button";
       preview.className = "link-button";
       preview.textContent = "Preview rollback";
-      preview.addEventListener("click", () => previewRollback(entry, entry.rollback_manifests[0]));
+      preview.addEventListener("click", () => {
+        previewRollback({ id: details.job_id }, details.rollback_manifests[0]);
+      });
       right.appendChild(preview);
     }
     row.append(mode, detail, right);
     list.appendChild(row);
   });
+}
+
+function resetAuditFilters() {
+  ["audit-host", "audit-action", "audit-from", "audit-to"].forEach((id) => {
+    $(id).value = "";
+  });
+  $("audit-all-hosts").checked = false;
+  $("audit-result").value = "";
+  return loadAudit();
+}
+
+async function saveAuditSettings() {
+  try {
+    await api("/api/audit/settings", {
+      method: "POST",
+      body: JSON.stringify({
+        retention_days: numberValue("audit-retention-days"),
+        rotation: $("audit-rotation").value
+      })
+    });
+    await loadAudit();
+    notify("Audit retention and rotation settings saved.", "success");
+  } catch (error) {
+    notify(error.message, "error", true);
+  }
 }
 
 async function loadManualControls() {
@@ -883,10 +952,13 @@ function wireEvents() {
   $("run-dry").addEventListener("click", startDryRun);
   $("open-apply").addEventListener("click", openApplyDialog);
   $("confirm-apply").addEventListener("click", confirmApply);
+  $("search-audit").addEventListener("click", loadAudit);
+  $("reset-audit").addEventListener("click", resetAuditFilters);
   $("refresh-audit").addEventListener("click", async () => {
     await Promise.all([loadAudit(), loadManualControls()]);
     notify("Audit refreshed.", "success");
   });
+  $("save-audit-settings").addEventListener("click", saveAuditSettings);
   $("close-context-button").addEventListener("click", openCloseDialog);
   $("confirm-close").addEventListener("click", confirmClose);
   $("confirm-rollback").addEventListener("click", confirmRollback);

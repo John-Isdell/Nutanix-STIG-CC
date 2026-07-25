@@ -27,6 +27,7 @@ COMMON_FILES = (
     "supervisor.py",
     "supervisor_setup.py",
     "app/requirements.txt",
+    "app/audit_log.py",
     "app/server.py",
 )
 COMMON_TREES = (
