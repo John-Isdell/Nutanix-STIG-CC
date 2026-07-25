@@ -18,7 +18,6 @@ from typing import Callable
 from urllib.error import URLError
 from urllib.request import Request, urlopen
 
-
 SUPERVISOR_HOST = "127.0.0.1"
 SUPERVISOR_PORT = 8765
 SUPERVISOR_URL = f"http://{SUPERVISOR_HOST}:{SUPERVISOR_PORT}"

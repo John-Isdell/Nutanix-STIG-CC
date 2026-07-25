@@ -15,6 +15,20 @@ internet-facing, reverse-proxy, or cloud-hosted use.
 - Back up and retain evidence under client policy.
 - Validate downloaded-package SHA-256 before installation.
 
+## Release integrity
+
+Each tagged GitHub Release contains separate Windows, macOS, and Linux source
+archives plus `SHA256SUMS.txt`. The release workflow builds from the tagged
+commit, uses an explicit file allowlist, rejects runtime, evidence, test, and
+repository-metadata paths, verifies the installer inventory and permissions,
+and computes SHA-256 after archive creation.
+
+Verify the selected archive against the checksum file before extraction. A
+matching digest detects a changed or incomplete download relative to that
+release; it does not establish that the source is suitable for a particular
+environment. Retain the tag, archive, checksum file, and approval record with
+the client change evidence.
+
 ## Credential handling
 
 Credentials are supplied to the local service for the current test or
@@ -61,3 +75,9 @@ Uninstall removes this registration and stops the application. It preserves
 Stop the service, preserve the service log and evidence, record the exact
 version and operating system, and route the issue through the client's approved
 security-response process.
+
+Do not disclose vulnerabilities, exploit details, credentials, customer
+information, cluster addresses, host keys, logs, or evidence through a public
+issue. Use the repository's private owner contact or private vulnerability
+reporting when available, then follow the affected client's disclosure and
+incident-response requirements.

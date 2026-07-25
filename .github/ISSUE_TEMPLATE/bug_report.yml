@@ -1,0 +1,65 @@
+name: Bug report
+description: Report a reproducible defect without exposing sensitive data.
+title: "[Bug]: "
+labels:
+  - bug
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Do not include credentials, customer names, cluster addresses, host keys,
+        private logs, or evidence. Report security vulnerabilities through the
+        Security policy instead of a public issue.
+  - type: input
+    id: version
+    attributes:
+      label: Control Center version
+      placeholder: "1.2.0"
+    validations:
+      required: true
+  - type: dropdown
+    id: operating-system
+    attributes:
+      label: Workstation operating system
+      options:
+        - Windows
+        - macOS
+        - Linux
+    validations:
+      required: true
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem
+      description: What happened, and what did you expect?
+    validations:
+      required: true
+  - type: textarea
+    id: reproduction
+    attributes:
+      label: Reproduction steps
+      description: Use sanitized values and say whether this was a dry run, apply, rollback, or local-only action.
+    validations:
+      required: true
+  - type: textarea
+    id: safety
+    attributes:
+      label: Safety impact
+      description: Did the failure affect remote state, evidence, approval, verification, or service availability?
+    validations:
+      required: true
+  - type: textarea
+    id: diagnostics
+    attributes:
+      label: Sanitized diagnostics
+      description: Paste only the minimum relevant output after removing infrastructure and identity details.
+      render: text
+  - type: checkboxes
+    id: confirmation
+    attributes:
+      label: Confirmation
+      options:
+        - label: I removed credentials, customer information, addresses, host keys, and evidence.
+          required: true
+        - label: I searched existing issues for the same defect.
+          required: true

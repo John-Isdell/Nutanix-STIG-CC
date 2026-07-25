@@ -1,0 +1,66 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    uses: ./.github/workflows/ci.yml
+    permissions:
+      contents: read
+
+  release:
+    name: Publish platform archives
+    needs:
+      - validate
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Check out tagged source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+
+      - name: Set up Python
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97  # v7.0.0
+        with:
+          python-version: "3.12"
+
+      - name: Require the tagged commit to be on main
+        shell: bash
+        run: |
+          tag_commit="$(git rev-list -n 1 "$GITHUB_REF_NAME")"
+          git merge-base --is-ancestor "$tag_commit" origin/main
+
+      - name: Require human bundled-document approval
+        env:
+          DOCS_COPYRIGHT_REVIEWED: ${{ vars.DOCS_COPYRIGHT_REVIEWED }}
+        shell: bash
+        run: |
+          if [[ "$DOCS_COPYRIGHT_REVIEWED" != "true" ]]; then
+            echo "::error::Set DOCS_COPYRIGHT_REVIEWED=true only after completing PUBLIC-RELEASE-CHECKLIST.md."
+            exit 1
+          fi
+
+      - name: Build and verify platform archives
+        shell: bash
+        run: |
+          version="${GITHUB_REF_NAME#v}"
+          python scripts/build_release.py --version "$version" --output dist
+
+      - name: Create GitHub Release and upload checksums
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          gh release create "$GITHUB_REF_NAME" dist/* \
+            --verify-tag \
+            --generate-notes \
+            --title "Nutanix STIG Control Center $GITHUB_REF_NAME"

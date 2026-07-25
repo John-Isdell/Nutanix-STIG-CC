@@ -22,7 +22,6 @@ from urllib.parse import urlsplit
 import control_center
 import supervisor_setup
 
-
 ROOT = Path(__file__).resolve().parent
 ASSET_DIR = ROOT / "supervisor_static"
 CSRF_TOKEN = secrets.token_urlsafe(32)
@@ -158,7 +157,9 @@ def status_snapshot() -> dict:
 
 
 def execute_action(action: str, job_id: str) -> dict:
-    progress = lambda message: add_progress(job_id, message)
+    def progress(message: str) -> None:
+        add_progress(job_id, message)
+
     with control_center.controller_lock():
         if action == "install":
             control_center.install_dependencies(progress=progress)

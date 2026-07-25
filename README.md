@@ -44,8 +44,7 @@ under `.runtime/venv`.
 1. Extract the package.
 2. Double-click `Install-Control-Center.command` once.
 3. If macOS blocks the downloaded script, right-click it and select **Open**,
-   or run `chmod +x Install-Control-Center.command install.sh` once from
-   Terminal.
+   or run `chmod +x Install-Control-Center.command` once from Terminal.
 4. The installer registers a per-user launchd agent and opens the supervisor.
 
 ### Linux
@@ -57,6 +56,38 @@ chmod +x install.sh
 
 The installer registers and starts a `systemd --user` service and opens the
 supervisor.
+
+## Release downloads and checksums
+
+Tagged releases publish three source packages:
+
+- `Nutanix-STIG-Control-Center-VERSION-windows.zip`
+- `Nutanix-STIG-Control-Center-VERSION-macos.zip`
+- `Nutanix-STIG-Control-Center-VERSION-linux.tar.gz`
+
+Download the matching platform package and `SHA256SUMS.txt` from the same
+GitHub Release. Verify the archive before extraction. On macOS:
+
+```text
+grep "ARCHIVE-NAME" SHA256SUMS.txt | shasum -a 256 -c -
+```
+
+On Linux:
+
+```text
+grep "ARCHIVE-NAME" SHA256SUMS.txt | sha256sum -c -
+```
+
+On Windows:
+
+```powershell
+(Get-FileHash .\ARCHIVE-NAME -Algorithm SHA256).Hash.ToLower()
+```
+
+Compare the Windows result with the corresponding value in
+`SHA256SUMS.txt`. A checksum proves file integrity relative to the release
+manifest; it does not replace source review or an approved software-delivery
+process.
 
 True zero-click installation is not possible: a local process must be started
 before a webpage can be served. Each workstation therefore needs exactly one
@@ -191,3 +222,22 @@ user service. It intentionally preserves `.runtime` and `app/data`.
 After confirming evidence retention requirements, the extracted application
 folder may be deleted manually. Do not delete `app/data` unless evidence
 destruction is explicitly authorized.
+
+## Contributing and releases
+
+See [CONTRIBUTING.md](CONTRIBUTING.md) for development checks and safety
+requirements, [SECURITY.md](SECURITY.md) for vulnerability handling, and
+[PUBLIC-RELEASE-CHECKLIST.md](PUBLIC-RELEASE-CHECKLIST.md) for the mandatory
+human and engineering gates before tagging a release.
+
+Pull requests run pinned-dependency lint and tests on Python 3.10 and 3.12.
+Version tags build the three platform archives, verify their inventory and
+installer permissions, generate `SHA256SUMS.txt`, and attach the results to a
+GitHub Release. Publication fails closed until a repository owner records the
+required human bundled-document copyright review. Release automation does not
+weaken the local-only, single-workstation threat model.
+
+## License
+
+This project is licensed under the [Apache License 2.0](LICENSE), including its
+explicit patent grant.

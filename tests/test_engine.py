@@ -14,7 +14,7 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 TEST_DEPS = os.path.join(HERE, "testdeps")
 sys.path.insert(0, TEST_DEPS)
 
-import paramiko
+import paramiko  # noqa: E402
 
 SPEC = importlib.util.spec_from_file_location(
     "nutanix_stig_harden",
