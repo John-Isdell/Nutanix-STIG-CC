@@ -1,0 +1,49 @@
+name: Feature request
+description: Propose a scoped enhancement that preserves the safety model.
+title: "[Feature]: "
+labels:
+  - enhancement
+body:
+  - type: markdown
+    attributes:
+      value: |
+        This project is intentionally local-only, single-workstation, and
+        isolated to one active cluster. Proposals must preserve dry-run,
+        approval, verification, credential, and evidence protections.
+  - type: textarea
+    id: problem
+    attributes:
+      label: Operator problem
+      description: What authorized workflow is difficult or unavailable today?
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposed behavior
+      description: Describe the smallest useful change and its user interface.
+    validations:
+      required: true
+  - type: textarea
+    id: safety
+    attributes:
+      label: Safety and security considerations
+      description: >-
+        Address authorization, failure handling, readback, secrets, host trust,
+        evidence, and one-cluster isolation.
+    validations:
+      required: true
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives and manual boundary
+      description: What remains manual, and why?
+  - type: checkboxes
+    id: confirmation
+    attributes:
+      label: Confirmation
+      options:
+        - label: This proposal does not require an internet-facing or multi-user service.
+          required: true
+        - label: This issue contains no sensitive client or infrastructure data.
+          required: true

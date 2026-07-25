@@ -15,6 +15,13 @@ Release date: July 24, 2026
 - Reduced lifecycle launchers to one installer per operating system.
 - Preserved active-operation stop protection, process identity verification,
   evidence, settings, host trust, and one-cluster isolation.
+- Added pull-request CI for pinned-dependency lint, Python tests, and the
+  browser regression on supported Python versions.
+- Added deterministic Windows, macOS, and Linux release archives with an
+  allowlisted inventory and generated SHA-256 checksums.
+- Added Dependabot version monitoring, contribution guidance, issue and pull
+  request templates, a code of conduct, and a mandatory human copyright review
+  gate for bundled documents.
 
 ## Portability boundary
 

@@ -12,7 +12,6 @@ import json
 import os
 import re
 import secrets
-import shutil
 import socket
 import subprocess
 import sys
@@ -26,13 +25,11 @@ from typing import Any, Literal
 
 import httpx
 import paramiko
+from core.nutanix_stig_harden import MANUAL_CONTROLS, PROFILE_NOTES, PROFILES
 from fastapi import Depends, FastAPI, Header, HTTPException, Request, Response
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
-
-from core.nutanix_stig_harden import MANUAL_CONTROLS, PROFILE_NOTES, PROFILES
-
 
 APP_DIR = Path(__file__).resolve().parent
 STATIC_DIR = APP_DIR / "static"

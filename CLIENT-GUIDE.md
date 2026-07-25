@@ -33,6 +33,36 @@ on a remotely accessible web server.
 - Internet/internal package repository access during first installation, or a
   prepared platform-compatible `wheelhouse`.
 
+## Obtain and verify the release
+
+Download the platform-specific archive and `SHA256SUMS.txt` from the same
+GitHub Release:
+
+- Windows: `Nutanix-STIG-Control-Center-VERSION-windows.zip`
+- macOS: `Nutanix-STIG-Control-Center-VERSION-macos.zip`
+- Linux: `Nutanix-STIG-Control-Center-VERSION-linux.tar.gz`
+
+On macOS, verify the selected file with:
+
+```text
+grep "ARCHIVE-NAME" SHA256SUMS.txt | shasum -a 256 -c -
+```
+
+On Linux, run:
+
+```text
+grep "ARCHIVE-NAME" SHA256SUMS.txt | sha256sum -c -
+```
+
+On Windows, run:
+
+```powershell
+(Get-FileHash .\ARCHIVE-NAME -Algorithm SHA256).Hash.ToLower()
+```
+
+Compare the Windows result with the corresponding lowercase value in
+`SHA256SUMS.txt`. Use only an archive whose checksum matches exactly.
+
 ## Install once
 
 ### Windows
@@ -53,7 +83,7 @@ on a remotely accessible web server.
 2. Double-click `Install-Control-Center.command`.
 3. If Gatekeeper blocks the downloaded script, right-click it and select
    **Open**. If executable permissions were not retained by the archive tool,
-   run `chmod +x Install-Control-Center.command install.sh` once.
+   run `chmod +x Install-Control-Center.command` once.
 4. The installer registers a launchd user agent and opens the supervisor.
 
 ### Linux

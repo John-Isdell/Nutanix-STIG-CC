@@ -7,7 +7,6 @@ import argparse
 import json
 import os
 import platform
-import shutil
 import signal
 import socket
 import subprocess
@@ -24,7 +23,6 @@ from urllib.error import URLError
 from urllib.request import Request, urlopen
 
 import supervisor_setup
-
 
 VERSION = "1.2.0"
 ROOT = Path(__file__).resolve().parent
@@ -536,7 +534,7 @@ def doctor() -> None:
     print("Nutanix STIG Control Center diagnostics")
     print("---------------------------------------")
     print(f"[PASS] Python {platform.python_version()} is supported")
-    print(f"[PASS] Application folder is complete and writable")
+    print("[PASS] Application folder is complete and writable")
     if dependencies_work():
         print("[PASS] Isolated dependencies import successfully")
     else:

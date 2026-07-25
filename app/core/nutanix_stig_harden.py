@@ -46,7 +46,7 @@ import smtplib
 import socket
 import sys
 import time
-from datetime import datetime, timedelta
+from datetime import datetime
 from email.message import EmailMessage
 
 try:
