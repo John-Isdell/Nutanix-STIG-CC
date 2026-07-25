@@ -183,6 +183,15 @@ cluster lockdown, organization-owned credential rotation, LDAPS/RBAC/CAC/PIV,
 certificate replacement, KMS/encryption, upstream network controls, accredited
 scanner results, POA&M handling, or ISSO/AO acceptance.
 
+The client guide maps automated and manual treatment to the Nutanix Security
+Guide 7.5 AHV, CVM, and PCVM hardening sections. The detailed
+[Security Guide 7.5 control crosswalk](app/docs/Nutanix_Security_Guide_7.5_Control_Crosswalk.md)
+records each treatment. In particular, DoDIN additional account-lock
+behavior, fapolicy, SSH restrictions, and security-configuration Lock Status
+remain manual. The guide also records Nutanix's AOS 7.5/AHV 11.0 RHEL 9 STIG
+limitation; this tool cannot turn an unsupported product baseline into a
+compliant one.
+
 ## Logs and troubleshooting
 
 - Local service log: `app/data/control-center-service.log`
