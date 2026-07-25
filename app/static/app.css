@@ -130,7 +130,10 @@ input[type="file"] { padding: 8px; }
 .fingerprint.loading code { background: #e8eef1; color: var(--muted); }
 .auth-card { background: #fff; }
 .choice-row { display: flex; gap: 8px; margin-bottom: 18px; }
-.choice input, .profile input { position: absolute; opacity: 0; pointer-events: none; }
+.choice input, .profile input {
+  position: absolute; width: 1px; height: 1px; margin: 0;
+  opacity: 0; pointer-events: none;
+}
 .choice span {
   display: block; border: 1px solid var(--line); padding: 9px 15px; border-radius: 9px; cursor: pointer;
 }
@@ -150,6 +153,16 @@ details.advanced { margin-top: 22px; border: 1px solid var(--line); border-radiu
 details.advanced summary { padding: 15px 17px; cursor: pointer; font-weight: 760; font-size: 14px; }
 .details-body { border-top: 1px solid var(--line); padding: 21px; }
 .details-body > * + * { margin-top: 20px; }
+.api-auth-help {
+  border: 1px solid #b9dce0; border-left: 4px solid var(--teal); border-radius: 10px;
+  padding: 16px 18px; background: #f3fbfb; color: #274653;
+}
+.api-auth-help strong { color: var(--teal-dark); }
+.api-auth-help p, .api-auth-help ol { margin: 8px 0 0; font-size: 13px; line-height: 1.55; }
+.api-auth-help ol { padding-left: 20px; }
+.api-auth-help li + li { margin-top: 5px; }
+.api-auth-help code { overflow-wrap: anywhere; }
+.api-auth-help a { color: var(--teal-dark); font-weight: 750; }
 .toggle, .check { display: flex; gap: 10px; align-items: flex-start; cursor: pointer; }
 .toggle input, .check input { width: auto; margin: 2px 0 0; }
 .toggle > span {

@@ -34,6 +34,12 @@ Release date: July 24, 2026
   target.
 - Added per-target completion/failure cards and exact text, JSON, and CSV
   evidence references while retaining fail-stop Apply behavior.
+- Added Prism Central pc.2024.3+ service-account API-key authentication for
+  the read-only v4.2 identity check using `X-Ntnx-Api-Key`, alongside existing
+  username/password authentication.
+- Added inline and client-guide instructions for the service-account, one-time
+  key capture, and least-privilege authorization-policy workflow. Persistent
+  IAM bootstrap changes remain intentionally manual.
 
 ## Portability boundary
 

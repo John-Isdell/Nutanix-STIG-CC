@@ -146,9 +146,10 @@ Credentials are not saved.
 
 ### 3. Optional Nutanix v4 identity
 
-Enable the v4.2 identity option, enter the Prism API information, and supply the
-approved CA bundle when system trust does not recognize the Prism certificate.
-TLS verification cannot be disabled.
+Enable the v4.2 identity option, enter the **Prism Central** address, choose an
+authentication method, and supply the approved CA bundle when system trust
+does not recognize the Prism Central certificate. TLS verification cannot be
+disabled.
 
 The Control Center uses:
 
@@ -157,6 +158,64 @@ The Control Center uses:
 If Prism Central returns multiple clusters, explicitly select the one cluster
 for this workspace. The v4 call is read-only. Security changes remain on the
 verified SSH/nCLI path.
+
+#### Username and password
+
+Select **Username / Password** to use HTTP Basic Authentication. This is the
+compatible choice for Prism Central releases older than pc.2024.3 and remains
+available on supported newer releases. The password is held only for the
+identity request and is not saved.
+
+#### API key on Prism Central pc.2024.3 or later
+
+Use API-key authentication only with Prism Central pc.2024.3 or later and
+supported AOS 7.0 or later clusters. API keys are attached only to dedicated
+`SERVICE_ACCOUNT` users. Nutanix does not provide Prism Central UI controls to
+create or manage these service accounts and keys, so an authorized Prism
+administrator must use the IAM v4 REST API or an approved SDK. Use the exact
+IAM schema advertised by the installed Prism Central release; the stable
+pc.2024.3 workflow is:
+
+1. Using an existing authorized administrator's Basic Auth credentials, create
+   the service account:
+
+   `POST /api/iam/v4.0/authn/users`
+
+   The request identifies a dedicated username and sets
+   `userType` to `SERVICE_ACCOUNT`. Record the returned user `extId`.
+2. Create an API key for that service-account `extId`:
+
+   `POST /api/iam/v4.0/authn/users/{extId}/keys`
+
+   Give the key an organization-approved name and request the API-key type.
+   **Capture and vault the generated key from this response immediately. The
+   secret is returned once and cannot be retrieved later.**
+3. Resolve the external identifier of a least-privilege role that can view the
+   intended cluster inventory, then create an authorization policy:
+
+   `POST /api/iam/v4.0/authz/authorization-policies`
+
+   Bind the service-account identity to that role and only the required
+   cluster/entity scope. The installed IAM schema requires the policy's role,
+   identities, and entities. A new service account has no permissions until
+   this policy exists; without it, the key may authenticate but the inventory
+   request is denied.
+4. In the Control Center, select **API Key**, enter the saved key, and click
+   **Verify v4 identity**. The request sends the key only in:
+
+   `X-Ntnx-Api-Key: <key>`
+
+The API key is treated as an ephemeral credential. It is excluded from saved
+configuration, operation metadata, service/audit logs, and evidence packages,
+and it is cleared when the cluster workspace is closed. The Control Center
+does not include a bootstrap button for the three IAM calls above because that
+would create persistent service-account, key, and authorization-policy
+objects. Perform that provisioning only through the client's approved IAM
+change process.
+
+Authoritative references: [Nutanix IAM API reference][iam-api],
+[Cluster Management v4.2 API reference][cluster-api], and
+[Cluster Management authentication configuration][cluster-auth].
 
 ### 4. Configure
 
@@ -333,6 +392,9 @@ vendor-supported release combination accepted by the authorizing official.
 [ahv75]: https://portal.nutanix.com/page/documents/details?targetId=Nutanix-Security-Guide-v7_5:sec-ahv-configuration-c.html
 [cvm75]: https://portal.nutanix.com/page/documents/details?targetId=Nutanix-Security-Guide-v7_5:sec-controller-virtual-machine-t.html
 [pcvm75]: https://portal.nutanix.com/page/documents/details?targetId=Nutanix-Security-Guide-v7_5:sec-pcvm-configuration-c.html
+[iam-api]: https://developers.nutanix.com/api-reference?namespace=iam&version=v4.0
+[cluster-api]: https://developers.nutanix.com/api-reference?namespace=clustermgmt&version=v4.2
+[cluster-auth]: https://developers.nutanix.com/api/v1/sdk/namespaces/main/clustermgmt/versions/v4.2/languages/python/configuration.html
 
 ## What remains manual
 

@@ -102,8 +102,19 @@ function createHarness() {
     "inspect-key": createElement(),
     "inspect-pc-key": createElement(),
     "trust-key": createElement(),
+    "api-auth-basic": createElement({ value: "basic" }),
+    "api-auth-key": createElement({ value: "api_key" }),
+    "api-basic-auth": createElement(),
+    "api-key-auth": createElement({ classes: ["hidden"] }),
+    "api-host": createElement({ value: "pc.example.test" }),
+    "api-port": createElement({ value: "9440" }),
+    "api-username": createElement({ value: "viewer" }),
+    "api-password": createElement({ value: "basic-secret" }),
+    "api-key": createElement({ value: "api-key-secret" }),
+    "api-result": createElement({ classes: ["hidden"] }),
     notice: createElement(),
   };
+  elements["api-auth-basic"].checked = true;
   const responses = [];
   const document = {
     addEventListener() {},
@@ -114,10 +125,18 @@ function createHarness() {
     createElement() {
       return createElement();
     },
-    querySelector() {
+    querySelector(selector) {
+      if (selector === 'input[name="api-auth"]:checked') {
+        return elements["api-auth-key"].checked
+          ? elements["api-auth-key"]
+          : elements["api-auth-basic"];
+      }
       return createElement({ value: "password" });
     },
-    querySelectorAll() {
+    querySelectorAll(selector) {
+      if (selector === 'input[name="api-auth"]') {
+        return [elements["api-auth-basic"], elements["api-auth-key"]];
+      }
       return [];
     },
   };
@@ -265,4 +284,30 @@ test("partial dry-run report keeps independent target status and failure totals"
     targetList.children[1].children[0].textContent,
     "Prism Central: connection failed"
   );
+});
+
+test("API auth selection sends only the selected ephemeral credential", () => {
+  const { elements, run } = createHarness();
+
+  const basic = JSON.parse(run("JSON.stringify(apiIdentityPayload())"));
+  assert.equal(basic.api_auth_method, "basic");
+  assert.equal(basic.api_username, "viewer");
+  assert.equal(basic.api_password, "basic-secret");
+  assert.equal(basic.api_key, "");
+
+  elements["api-auth-basic"].checked = false;
+  elements["api-auth-key"].checked = true;
+  elements["api-auth-key"].dispatch("change");
+
+  assert.equal(elements["api-password"].value, "");
+  assert.equal(elements["api-key"].disabled, false);
+  assert.equal(elements["api-username"].disabled, true);
+  assert.equal(elements["api-basic-auth"].classList.contains("hidden"), true);
+  assert.equal(elements["api-key-auth"].classList.contains("hidden"), false);
+
+  const apiKey = JSON.parse(run("JSON.stringify(apiIdentityPayload())"));
+  assert.equal(apiKey.api_auth_method, "api_key");
+  assert.equal(apiKey.api_username, "");
+  assert.equal(apiKey.api_password, "");
+  assert.equal(apiKey.api_key, "api-key-secret");
 });
