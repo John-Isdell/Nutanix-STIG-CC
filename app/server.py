@@ -50,7 +50,7 @@ KNOWN_HOSTS.touch(mode=0o600, exist_ok=True)
 
 app = FastAPI(
     title="Nutanix STIG Control Center",
-    version="1.2.0",
+    version="1.3.0",
     docs_url=None,
     redoc_url=None,
     openapi_url="/api/openapi.json",
@@ -529,7 +529,7 @@ def bootstrap(request: Request, response: Response) -> dict[str, Any]:
             )
     return {
         "csrf": sessions[sid]["csrf"],
-        "version": "1.2.0",
+        "version": "1.3.0",
         "active_cluster": state.get("active_cluster"),
         "latest_dry_run": state.get("latest_dry_run"),
         "profiles": [

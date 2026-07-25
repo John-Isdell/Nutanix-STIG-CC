@@ -5,7 +5,7 @@
 > Nutanix, Inc., used here descriptively only. See [NOTICE.md](NOTICE.md) for
 > the full notice.
 
-Version 1.2.0
+Version 1.3.0
 
 This distribution runs directly on Windows, macOS, or Linux without Node.js, a
 container platform, or a separately installed web server. It uses the
@@ -19,9 +19,9 @@ engine.
 - Windows 10/11 or supported Windows Server, macOS, or a modern Linux
   distribution.
 - 64-bit Python 3.10 or newer. Python 3.12 is the tested release.
-- On Windows, a local administrator must approve the installer’s one-time UAC
-  prompt so Windows can register the per-user Scheduled Task. The registered
-  task and Control Center run with limited user privileges.
+- On Windows, installation runs entirely as the current user and creates a
+  per-user Startup-folder shortcut. No administrator or UAC approval is
+  required.
 - Network access from the workstation to the selected Nutanix CVM, optional
   PCVM, and optional Prism API.
 - Internet or internal Python-package repository access during first
@@ -38,11 +38,8 @@ under `.runtime/venv`.
 
 1. Extract the complete package to a protected local folder.
 2. Double-click `Install-Control-Center.cmd` once.
-3. Approve the one-time Windows UAC prompt. This approval is required only to
-   register the per-user login task; the task itself runs with limited
-   privileges.
-4. The installer creates the private runtime, registers the Scheduled Task,
-   starts the supervisor, and opens `http://127.0.0.1:8765`.
+3. The installer creates the private runtime, adds a per-user Startup-folder
+   shortcut, starts the supervisor, and opens `http://127.0.0.1:8765`.
 
 ### macOS
 
@@ -254,8 +251,8 @@ used as a normal shutdown method.
 ## Uninstall
 
 Click **Uninstall supervisor** on the localhost supervisor page. This stops the
-Control Center and removes the Scheduled Task, launchd user agent, or systemd
-user service. It intentionally preserves `.runtime` and `app/data`.
+Control Center and removes the Startup-folder shortcut, launchd user agent, or
+systemd user service. It intentionally preserves `.runtime` and `app/data`.
 
 After confirming evidence retention requirements, the extracted application
 folder may be deleted manually. Do not delete `app/data` unless evidence

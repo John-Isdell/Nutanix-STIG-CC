@@ -30,7 +30,7 @@ For Nutanix's official products, documentation, and support channels, visit
 
 ## Client installation and execution guide
 
-Version 1.2.0 — July 24, 2026
+Version 1.3.0 — July 24, 2026
 
 ## Purpose
 
@@ -98,12 +98,10 @@ Compare the Windows result with the corresponding lowercase value in
 1. Verify the delivered package SHA-256.
 2. Extract the complete package into a protected user-controlled folder.
 3. Double-click `Install-Control-Center.cmd`.
-4. Approve the one-time Windows UAC prompt. Windows requires administrator
-   approval to register the login task; the resulting task and application run
-   with limited user privileges.
-5. Wait while the private Python environment is created, pinned dependencies
-   are installed, and a per-user Scheduled Task is registered.
-6. The browser opens to `http://127.0.0.1:8765`.
+4. Wait while the private Python environment is created, pinned dependencies
+   are installed, and a per-user Startup-folder shortcut is created. No
+   administrator or UAC approval is required.
+5. The browser opens to `http://127.0.0.1:8765`.
 
 ### macOS
 

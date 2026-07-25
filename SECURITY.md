@@ -83,14 +83,12 @@ showing or saving installation progress.
 
 ## Operating-system registration
 
-- Windows uses a least-privilege, interactive per-user Scheduled Task at login.
+- Windows uses a per-user shortcut in the account's Startup folder.
 - macOS uses a per-user launchd agent under `~/Library/LaunchAgents`.
 - Linux uses a `systemd --user` service.
 
-Windows requires one administrator-approved UAC prompt during initial
-registration. The installed task uses the `LIMITED` run level, and its task ACL
-allows the installing user to manage or uninstall it later without granting the
-supervisor elevated runtime privileges.
+Windows registration and removal run entirely as the current user and do not
+request administrator or UAC approval.
 
 Uninstall removes this registration and stops the application. It preserves
 `.runtime` and `app/data` so evidence is not silently destroyed.

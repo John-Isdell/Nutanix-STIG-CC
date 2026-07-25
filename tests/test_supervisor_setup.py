@@ -1,3 +1,4 @@
+import json
 import plistlib
 import subprocess
 import sys
@@ -26,50 +27,73 @@ class SupervisorRegistrationArtifactTests(unittest.TestCase):
     def tearDown(self):
         self.temp.cleanup()
 
-    def test_windows_task_is_per_user_on_logon_and_least_privilege(self):
-        command = supervisor_setup.windows_task_command(
+    def test_windows_startup_shortcut_is_per_user(self):
+        shortcut_path = supervisor_setup.windows_startup_shortcut_path(
+            self.base
+        )
+        command = supervisor_setup.windows_startup_shortcut_command(
             self.root,
             self.python,
-            username="DOMAIN\\operator",
+            shortcut_path,
         )
-        self.assertEqual(command[0], "schtasks.exe")
-        self.assertIn(supervisor_setup.WINDOWS_TASK_NAME, command)
-        self.assertEqual(command[command.index("/SC") + 1], "ONLOGON")
-        self.assertEqual(command[command.index("/RU") + 1], "DOMAIN\\operator")
-        self.assertEqual(command[command.index("/RL") + 1], "LIMITED")
-        self.assertIn("/IT", command)
-        action = command[command.index("/TR") + 1]
-        self.assertIn(str(self.root / "supervisor.py"), action)
-
-    def test_windows_task_acl_keeps_runtime_limited_but_user_manageable(self):
-        command = supervisor_setup.windows_task_security_command(
-            username="DOMAIN\\operator",
+        self.assertEqual(command[0], "powershell.exe")
+        self.assertIn(
+            str(
+                self.base
+                / "AppData"
+                / "Roaming"
+                / "Microsoft"
+                / "Windows"
+                / "Start Menu"
+                / "Programs"
+                / "Startup"
+            ),
+            str(shortcut_path),
         )
         script = command[command.index("-Command") + 1]
-        self.assertIn("SetSecurityDescriptor", script)
-        self.assertIn("(A;;GA;;;SY)", script)
-        self.assertIn("(A;;GA;;;BA)", script)
-        self.assertEqual(command[-1], "DOMAIN\\operator")
+        self.assertIn("WScript.Shell", script)
+        self.assertIn("CreateShortcut", script)
+        self.assertIn(str(shortcut_path), script)
+        self.assertIn(str(self.root / "supervisor.py"), script)
 
-    def test_windows_installer_requests_one_time_elevation(self):
+    def test_windows_installer_does_not_request_elevation(self):
         installer = (ROOT / "Install-Control-Center.cmd").read_text(
             encoding="utf-8"
         )
-        self.assertIn("-Verb RunAs", installer)
-        self.assertIn("--elevated", installer)
-        self.assertIn("fltmc.exe", installer)
+        registration = (ROOT / "supervisor_setup.py").read_text(
+            encoding="utf-8"
+        )
+        windows_install_code = installer + registration
+        for forbidden in (
+            "-Verb RunAs",
+            "--elevated",
+            "fltmc.exe",
+            "schtasks.exe",
+            "Scheduled Task",
+        ):
+            self.assertNotIn(forbidden, windows_install_code)
+        self.assertIn("Startup folder", installer)
 
-    def test_failed_windows_removal_preserves_registration_marker(self):
+    def test_failed_windows_shortcut_removal_preserves_registration_marker(self):
         marker_path = supervisor_setup.registration_file(self.root)
         marker_path.parent.mkdir(parents=True)
+        shortcut_path = supervisor_setup.windows_startup_shortcut_path(
+            self.base
+        )
         marker_path.write_text(
-            '{"platform":"Windows","kind":"Scheduled Task"}',
+            json.dumps(
+                {
+                    "platform": "Windows",
+                    "kind": "Startup-folder shortcut",
+                    "path": str(shortcut_path),
+                }
+            ),
             encoding="utf-8",
         )
         with mock.patch.object(
             supervisor_setup,
-            "_run",
-            side_effect=supervisor_setup.SupervisorSetupError("denied"),
+            "_unlink",
+            side_effect=PermissionError("denied"),
         ):
             with self.assertRaises(supervisor_setup.SupervisorSetupError):
                 supervisor_setup.unregister_supervisor(
@@ -78,28 +102,64 @@ class SupervisorRegistrationArtifactTests(unittest.TestCase):
                 )
         self.assertTrue(marker_path.exists())
 
-    def test_partial_windows_registration_is_rolled_back(self):
-        commands = []
-
-        def fake_run(command, label, progress=None, check=True):
-            commands.append(command)
-            if label == "Windows Scheduled Task permission assignment":
-                raise supervisor_setup.SupervisorSetupError("ACL failed")
-            return subprocess.CompletedProcess(command, 0, "", "")
-
-        with mock.patch.object(supervisor_setup, "_run", side_effect=fake_run):
+    def test_partial_windows_shortcut_registration_is_rolled_back(self):
+        shortcut_path = supervisor_setup.windows_startup_shortcut_path(
+            self.base
+        )
+        with (
+            mock.patch.object(
+                supervisor_setup,
+                "_run",
+                return_value=subprocess.CompletedProcess([], 0, "", ""),
+            ),
+            mock.patch.object(supervisor_setup, "_start_windows_supervisor"),
+            mock.patch.object(
+                supervisor_setup,
+                "wait_for_supervisor",
+                side_effect=supervisor_setup.SupervisorSetupError(
+                    "start failed"
+                ),
+            ),
+        ):
             with self.assertRaises(supervisor_setup.SupervisorSetupError):
                 supervisor_setup.register_supervisor(
                     self.root,
                     self.python,
                     platform_name="Windows",
+                    home=self.base,
                 )
-        self.assertTrue(
-            any("/Delete" in command for command in commands),
-        )
+        self.assertFalse(shortcut_path.exists())
         self.assertFalse(
             supervisor_setup.registration_file(self.root).exists(),
         )
+
+    def test_windows_unregister_removes_shortcut_and_marker(self):
+        shortcut_path = supervisor_setup.windows_startup_shortcut_path(
+            self.base
+        )
+        shortcut_path.parent.mkdir(parents=True)
+        shortcut_path.write_text("shortcut", encoding="utf-8")
+        marker_path = supervisor_setup.registration_file(self.root)
+        marker_path.parent.mkdir(parents=True)
+        marker_path.write_text(
+            json.dumps(
+                {
+                    "platform": "Windows",
+                    "kind": "Startup-folder shortcut",
+                    "path": str(shortcut_path),
+                }
+            ),
+            encoding="utf-8",
+        )
+
+        supervisor_setup.unregister_supervisor(
+            self.root,
+            platform_name="Windows",
+            home=self.base,
+        )
+
+        self.assertFalse(shortcut_path.exists())
+        self.assertFalse(marker_path.exists())
 
     def test_macos_launch_agent_is_user_scoped_and_keepalive(self):
         definition = supervisor_setup.macos_launch_agent(self.root, self.python)

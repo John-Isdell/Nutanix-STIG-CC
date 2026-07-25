@@ -3,7 +3,6 @@
 
 from __future__ import annotations
 
-import getpass
 import json
 import os
 import platform
@@ -21,7 +20,7 @@ from urllib.request import Request, urlopen
 SUPERVISOR_HOST = "127.0.0.1"
 SUPERVISOR_PORT = 8765
 SUPERVISOR_URL = f"http://{SUPERVISOR_HOST}:{SUPERVISOR_PORT}"
-WINDOWS_TASK_NAME = "Nutanix STIG Control Center Supervisor"
+WINDOWS_SHORTCUT_NAME = "Nutanix STIG Control Center Supervisor.lnk"
 MACOS_LABEL = "com.nutanix.stig-control-center.supervisor"
 LINUX_UNIT_NAME = "nutanix-stig-control-center-supervisor.service"
 
@@ -57,6 +56,26 @@ def registration_file(root: Path) -> Path:
 
 def log_file(root: Path) -> Path:
     return runtime_dir(root) / "supervisor.log"
+
+
+def windows_startup_shortcut_path(home: Path | None = None) -> Path:
+    if home is None:
+        appdata = os.environ.get("APPDATA")
+        if appdata:
+            startup_root = Path(appdata)
+        else:
+            startup_root = Path.home() / "AppData" / "Roaming"
+    else:
+        startup_root = home / "AppData" / "Roaming"
+    return (
+        startup_root
+        / "Microsoft"
+        / "Windows"
+        / "Start Menu"
+        / "Programs"
+        / "Startup"
+        / WINDOWS_SHORTCUT_NAME
+    )
 
 
 def supervisor_script(root: Path) -> Path:
@@ -161,55 +180,29 @@ def host_python(python_executable: str | Path | None = None) -> Path:
     return candidate
 
 
-def windows_task_command(
+def _powershell_literal(value: str | Path) -> str:
+    return "'" + str(value).replace("'", "''") + "'"
+
+
+def windows_startup_shortcut_command(
     root: Path,
     python_executable: str | Path,
-    username: str | None = None,
+    shortcut_path: Path,
 ) -> list[str]:
-    action = subprocess.list2cmdline(
-        [str(host_python(python_executable)), str(supervisor_script(root))]
-    )
-    user = username or (
-        f"{os.environ.get('USERDOMAIN')}\\{os.environ.get('USERNAME')}"
-        if os.environ.get("USERDOMAIN") and os.environ.get("USERNAME")
-        else getpass.getuser()
-    )
-    return [
-        "schtasks.exe",
-        "/Create",
-        "/TN",
-        WINDOWS_TASK_NAME,
-        "/TR",
-        action,
-        "/SC",
-        "ONLOGON",
-        "/RU",
-        user,
-        "/IT",
-        "/RL",
-        "LIMITED",
-        "/F",
-    ]
-
-
-def windows_task_security_command(
-    username: str | None = None,
-) -> list[str]:
-    """Grant the task principal control without elevating its runtime."""
-    user = username or (
-        f"{os.environ.get('USERDOMAIN')}\\{os.environ.get('USERNAME')}"
-        if os.environ.get("USERDOMAIN") and os.environ.get("USERNAME")
-        else getpass.getuser()
-    )
+    arguments = subprocess.list2cmdline([str(supervisor_script(root))])
     script = (
-        "$taskName=$args[0];$account=$args[1];"
-        "$sid=(New-Object System.Security.Principal.NTAccount($account))"
-        ".Translate([System.Security.Principal.SecurityIdentifier]).Value;"
-        "$service=New-Object -ComObject 'Schedule.Service';"
-        "$service.Connect();"
-        "$task=$service.GetFolder('\\').GetTask($taskName);"
-        "$sddl='D:P(A;;GA;;;SY)(A;;GA;;;BA)(A;;GA;;;'+$sid+')';"
-        "$task.SetSecurityDescriptor($sddl,0)"
+        f"$shortcutPath={_powershell_literal(shortcut_path)};"
+        f"$targetPath={_powershell_literal(host_python(python_executable))};"
+        f"$arguments={_powershell_literal(arguments)};"
+        f"$workingDirectory={_powershell_literal(root)};"
+        "$shell=New-Object -ComObject WScript.Shell;"
+        "$shortcut=$shell.CreateShortcut($shortcutPath);"
+        "$shortcut.TargetPath=$targetPath;"
+        "$shortcut.Arguments=$arguments;"
+        "$shortcut.WorkingDirectory=$workingDirectory;"
+        "$shortcut.WindowStyle=7;"
+        "$shortcut.Description='Nutanix STIG Control Center localhost supervisor';"
+        "$shortcut.Save()"
     )
     return [
         "powershell.exe",
@@ -219,9 +212,36 @@ def windows_task_security_command(
         "Bypass",
         "-Command",
         script,
-        WINDOWS_TASK_NAME,
-        user,
     ]
+
+
+def _start_windows_supervisor(
+    root: Path,
+    python_executable: str | Path,
+) -> None:
+    creation_flags = 0
+    if os.name == "nt":
+        creation_flags = (
+            getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0)
+            | getattr(subprocess, "DETACHED_PROCESS", 0)
+        )
+    try:
+        subprocess.Popen(
+            [
+                str(host_python(python_executable)),
+                str(supervisor_script(root)),
+            ],
+            cwd=root,
+            stdin=subprocess.DEVNULL,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            close_fds=True,
+            creationflags=creation_flags,
+        )
+    except OSError as exc:
+        raise SupervisorSetupError(
+            f"Windows supervisor start could not begin: {exc}"
+        ) from exc
 
 
 def macos_launch_agent(
@@ -319,16 +339,17 @@ def _rollback_registration(
     """Best-effort rollback for an installation that did not become healthy."""
     _emit("Supervisor registration failed; rolling back automatic startup…", progress)
     if selected_platform == "Windows":
-        result = _run(
-            ["schtasks.exe", "/Delete", "/TN", WINDOWS_TASK_NAME, "/F"],
-            "Windows Scheduled Task rollback",
-            progress,
-            False,
+        marker = registration_status(root)
+        target = Path(
+            marker.get("path")
+            or windows_startup_shortcut_path(selected_home)
         )
-        if result.returncode == 0:
+        try:
+            _unlink(target)
             _unlink(registration_file(root))
             return True
-        return False
+        except OSError:
+            return False
     if selected_platform == "Darwin":
         service = f"gui/{os.getuid()}/{MACOS_LABEL}"
         _run(["launchctl", "bootout", service], "launchd rollback", progress, False)
@@ -374,29 +395,25 @@ def register_supervisor(
     registration_started = False
     try:
         if selected_platform == "Windows":
+            target = windows_startup_shortcut_path(
+                home if home is not None else None
+            )
+            target.parent.mkdir(parents=True, exist_ok=True)
             _run(
-                windows_task_command(root, python),
-                "Windows Scheduled Task registration",
+                windows_startup_shortcut_command(root, python, target),
+                "Windows Startup-folder shortcut registration",
                 progress,
             )
             registration_started = True
             marker = {
                 "platform": selected_platform,
-                "kind": "Scheduled Task",
-                "identifier": WINDOWS_TASK_NAME,
+                "kind": "Startup-folder shortcut",
+                "identifier": WINDOWS_SHORTCUT_NAME,
+                "path": str(target),
                 "registered_at": utc_now(),
             }
             _write_json(registration_file(root), marker)
-            _run(
-                windows_task_security_command(),
-                "Windows Scheduled Task permission assignment",
-                progress,
-            )
-            _run(
-                ["schtasks.exe", "/Run", "/TN", WINDOWS_TASK_NAME],
-                "Windows Scheduled Task start",
-                progress,
-            )
+            _start_windows_supervisor(root, python)
         elif selected_platform == "Darwin":
             target = macos_plist_path(selected_home)
             target.parent.mkdir(parents=True, exist_ok=True)
@@ -473,8 +490,9 @@ def register_supervisor(
         )
         if not rollback_ok:
             raise SupervisorSetupError(
-                f"{exc} Automatic-start rollback also failed; remove "
-                f"{WINDOWS_TASK_NAME!r} manually and review {log_file(root)}."
+                f"{exc} Automatic-start rollback also failed; remove the "
+                f"Windows Startup-folder shortcut manually and review "
+                f"{log_file(root)}."
             ) from exc
         if isinstance(exc, SupervisorSetupError):
             raise
@@ -499,12 +517,18 @@ def unregister_supervisor(
     _emit(f"Removing the {selected_platform} supervisor registration…", progress)
 
     if selected_platform == "Windows":
-        _run(
-            ["schtasks.exe", "/Delete", "/TN", WINDOWS_TASK_NAME, "/F"],
-            "Windows Scheduled Task removal",
-            progress,
-            bool(marker),
+        target = Path(
+            marker.get("path")
+            or windows_startup_shortcut_path(
+                home if home is not None else None
+            )
         )
+        try:
+            _unlink(target)
+        except OSError as exc:
+            raise SupervisorSetupError(
+                f"Windows Startup-folder shortcut removal failed: {exc}"
+            ) from exc
         _unlink(registration_file(root))
     elif selected_platform == "Darwin":
         target = macos_plist_path(selected_home)
