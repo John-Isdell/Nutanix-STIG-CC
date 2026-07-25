@@ -38,6 +38,7 @@ function createElement({ classes = [], value = "" } = {}) {
   const listeners = new Map();
   return {
     checked: false,
+    children: [],
     classList: new ClassList(...classes),
     className: "",
     dataset: {},
@@ -55,6 +56,16 @@ function createElement({ classes = [], value = "" } = {}) {
       for (const callback of listeners.get(type) || []) {
         callback({ target: this });
       }
+    },
+    append(...children) {
+      this.children.push(...children);
+    },
+    appendChild(child) {
+      this.children.push(child);
+      return child;
+    },
+    replaceChildren(...children) {
+      this.children = [...children];
     },
     scrollIntoView() {},
   };
@@ -99,6 +110,9 @@ function createHarness() {
     getElementById(id) {
       if (!elements[id]) elements[id] = createElement();
       return elements[id];
+    },
+    createElement() {
+      return createElement();
     },
     querySelector() {
       return createElement({ value: "password" });
@@ -184,4 +198,71 @@ test("switching from cluster host A to PC host B clears A before showing B", asy
   elements["fingerprint-suffix"].value = "BBBBBBBBBBBB";
   elements["fingerprint-suffix"].dispatch("input");
   assert.equal(elements["trust-key"].disabled, false);
+});
+
+test("partial dry-run report keeps independent target status and failure totals", () => {
+  const { elements, run } = createHarness();
+  const report = {
+    targets: [
+      {
+        host: "cluster.example.test",
+        type: "cluster",
+        status: "complete",
+        phase: "complete",
+        preflight: "PASS",
+        failures: 0,
+        scopes: {
+          cvm: { planned: 2, applied: 0, verified: 0, failed: 0, skipped: 1 }
+        }
+      },
+      {
+        host: "pcvm.example.test",
+        type: "prism_central",
+        status: "connection_failed",
+        phase: "connection",
+        preflight: "NOT_RUN",
+        failures: 1,
+        error: "SSH connection failed: timed out",
+        report_path: "reports/stig_report_run.txt",
+        json_report_path: "reports/stig_report_run.json",
+        csv_log: "logs/stig_run_run.csv",
+        scopes: {}
+      }
+    ]
+  };
+
+  const statuses = JSON.parse(
+    run(`JSON.stringify(targetStatusesFromReport(${JSON.stringify(report)}))`)
+  );
+  const totals = JSON.parse(
+    run(`JSON.stringify(totalsFromReport(${JSON.stringify(report)}))`)
+  );
+
+  assert.equal(statuses[0].label, "Cluster");
+  assert.equal(statuses[0].statusText, "complete");
+  assert.equal(statuses[1].label, "Prism Central");
+  assert.equal(statuses[1].statusText, "connection failed");
+  assert.match(statuses[1].detail, /timed out/);
+  assert.equal(statuses[1].reportPath, "reports/stig_report_run.txt");
+  assert.equal(statuses[1].jsonReportPath, "reports/stig_report_run.json");
+  assert.equal(totals.planned, 2);
+  assert.equal(totals.failed, 1);
+  assert.equal(totals.skipped, 1);
+
+  run(`renderJob(${JSON.stringify({
+    id: "partial-run",
+    mode: "DRY_RUN",
+    status: "failed",
+    report
+  })})`);
+  const targetList = elements["job-result"].children.find(
+    (child) => child.className === "target-status-list"
+  );
+  assert.ok(targetList);
+  assert.equal(targetList.children.length, 2);
+  assert.equal(targetList.children[0].children[0].textContent, "Cluster: complete");
+  assert.equal(
+    targetList.children[1].children[0].textContent,
+    "Prism Central: connection failed"
+  );
 });

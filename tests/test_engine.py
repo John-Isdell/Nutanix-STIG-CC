@@ -9,6 +9,7 @@ import tempfile
 import threading
 import time
 import unittest
+from unittest.mock import patch
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 TEST_DEPS = os.path.join(HERE, "testdeps")
@@ -38,6 +39,14 @@ class MockState:
                 "enable_kernel_core": True,
             },
             "ahv": {
+                "schedule": "WEEKLY",
+                "enable_aide": False,
+                "enable_high_strength_password": False,
+                "enable_banner": False,
+                "enable_core": True,
+                "enable_kernel_core": True,
+            },
+            "pcvm": {
                 "schedule": "WEEKLY",
                 "enable_aide": False,
                 "enable_high_strength_password": False,
@@ -88,7 +97,7 @@ class MockState:
         if command in static:
             return static[command]
 
-        for scope in ("cvm", "ahv"):
+        for scope in ("cvm", "ahv", "pcvm"):
             get_cmd = stig.SCOPES[scope]["get_cmd"]
             set_cmd = stig.SCOPES[scope]["set_cmd"]
             if command == get_cmd:
@@ -231,6 +240,51 @@ class ScriptTests(unittest.TestCase):
             parser.write(handle)
         return path
 
+    @staticmethod
+    def _unused_local_port():
+        probe = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        probe.bind(("127.0.0.1", 0))
+        port = probe.getsockname()[1]
+        probe.close()
+        return port
+
+    @staticmethod
+    def _configure_targets(
+        path,
+        scopes,
+        cluster_port=None,
+        pc_host="127.0.0.1",
+        pc_port=22,
+    ):
+        parser = configparser.ConfigParser()
+        parser.read(path)
+        parser["options"]["scopes"] = ",".join(scopes)
+        if cluster_port is not None:
+            parser["cluster"]["port"] = str(cluster_port)
+        parser["prism_central"] = {
+            "host": pc_host,
+            "username": "nutanix",
+            "password": "mock-password",
+            "port": str(pc_port),
+        }
+        with open(path, "w", encoding="utf-8") as handle:
+            parser.write(handle)
+
+    @staticmethod
+    def _load_only_report():
+        report_files = [
+            name for name in os.listdir(stig.REPORT_DIR)
+            if name.endswith(".json")
+        ]
+        if len(report_files) != 1:
+            raise AssertionError("Expected exactly one JSON report")
+        with open(
+            os.path.join(stig.REPORT_DIR, report_files[0]),
+            "r",
+            encoding="utf-8",
+        ) as handle:
+            return json.load(handle)
+
     def test_build_plan_never_applies_unknown_current_value(self):
         baseline = {"scopes": {"cvm": {"parsed": {"enable_aide": False}}}}
         plan, skipped = stig.build_plan(
@@ -265,6 +319,205 @@ class ScriptTests(unittest.TestCase):
         self.assertFalse(any(" edit-" in cmd and "=" in cmd
                              for cmd in state.commands))
         self.assertTrue(any(cmd == "ncli cluster info" for cmd in state.commands))
+
+    def test_dry_run_continues_after_pcvm_connection_failure(self):
+        state = MockState()
+        server = MockSSHListener(state).start()
+        closed_port = self._unused_local_port()
+        try:
+            config = self._write_config(server)
+            self._configure_targets(
+                config,
+                ["cvm", "ahv", "pcvm"],
+                pc_port=closed_port,
+            )
+            rc = stig.main(["--config", config, "--non-interactive", "--quiet"])
+        finally:
+            server.close()
+
+        self.assertEqual(rc, 2)
+        self.assertTrue(any(cmd == "ncli cluster info" for cmd in state.commands))
+        report = self._load_only_report()
+        self.assertNotIn("fatal_error", report["results"])
+        targets = report["results"]["targets"]
+        self.assertEqual(
+            [(target["type"], target["status"]) for target in targets],
+            [
+                ("cluster", "complete"),
+                ("prism_central", "connection_failed"),
+            ],
+        )
+        pc_target = targets[1]
+        self.assertEqual(pc_target["phase"], "connection")
+        self.assertIn("SSH connection to 127.0.0.1 failed", pc_target["error"])
+        self.assertTrue(os.path.isfile(pc_target["report_path"]))
+        self.assertTrue(os.path.isfile(pc_target["json_report_path"]))
+        self.assertTrue(os.path.isfile(pc_target["csv_log"]))
+        with open(pc_target["report_path"], "r", encoding="utf-8") as handle:
+            summary = handle.read()
+        self.assertIn("Target       : 127.0.0.1 (cluster)", summary)
+        self.assertIn("Target       : 127.0.0.1 (prism_central)", summary)
+        self.assertIn(pc_target["error"], summary)
+        self.assertIn(pc_target["csv_log"], summary)
+
+    def test_dry_run_continues_to_pcvm_after_cluster_connection_failure(self):
+        pc_state = MockState()
+        pc_server = MockSSHListener(pc_state).start()
+        closed_cluster_port = self._unused_local_port()
+        try:
+            config = self._write_config(pc_server)
+            self._configure_targets(
+                config,
+                ["cvm", "pcvm"],
+                cluster_port=closed_cluster_port,
+                pc_port=pc_server.port,
+            )
+            rc = stig.main(["--config", config, "--non-interactive", "--quiet"])
+        finally:
+            pc_server.close()
+
+        self.assertEqual(rc, 2)
+        self.assertTrue(
+            any(
+                command == stig.SCOPES["pcvm"]["get_cmd"]
+                for command in pc_state.commands
+            )
+        )
+        self.assertFalse(
+            any(" edit-" in command and "=" in command
+                for command in pc_state.commands)
+        )
+        targets = self._load_only_report()["results"]["targets"]
+        self.assertEqual(
+            [(target["type"], target["status"]) for target in targets],
+            [
+                ("cluster", "connection_failed"),
+                ("prism_central", "complete"),
+            ],
+        )
+
+    def test_dry_run_preserves_authentication_failure_detail(self):
+        state = MockState()
+        server = MockSSHListener(state).start()
+        try:
+            config = self._write_config(server)
+            parser = configparser.ConfigParser()
+            parser.read(config)
+            parser["cluster"]["password"] = "incorrect-password"
+            with open(config, "w", encoding="utf-8") as handle:
+                parser.write(handle)
+            rc = stig.main(["--config", config, "--non-interactive", "--quiet"])
+        finally:
+            server.close()
+
+        self.assertEqual(rc, 2)
+        report = self._load_only_report()
+        self.assertNotIn("fatal_error", report["results"])
+        target = report["results"]["targets"][0]
+        self.assertEqual(target["status"], "connection_failed")
+        self.assertIn("Authentication failed for nutanix@127.0.0.1", target["error"])
+
+    def test_unexpected_target_connection_error_is_structured_and_reported(self):
+        state = MockState()
+        server = MockSSHListener(state).start()
+        try:
+            config = self._write_config(server)
+            self._configure_targets(
+                config,
+                ["pcvm"],
+                pc_host="pcvm.example.test",
+                pc_port=22,
+            )
+            with patch.object(
+                stig,
+                "open_session",
+                side_effect=ValueError("unexpected connection setup failure"),
+            ):
+                rc = stig.main([
+                    "--config",
+                    config,
+                    "--non-interactive",
+                    "--quiet",
+                ])
+        finally:
+            server.close()
+
+        self.assertEqual(rc, 2)
+        target = self._load_only_report()["results"]["targets"][0]
+        self.assertEqual(target["status"], "connection_failed")
+        self.assertEqual(target["phase"], "connection")
+        self.assertEqual(
+            target["error"],
+            "ValueError: unexpected connection setup failure",
+        )
+
+    def test_unexpected_target_execution_error_is_structured_and_reported(self):
+        logger = stig.RunLogger(
+            "unexpected-execution",
+            30,
+            stig.Console(quiet=True),
+        )
+        fake_session = object()
+        with (
+            patch.object(stig, "open_session", return_value=fake_session),
+            patch.object(
+                stig,
+                "process_target",
+                side_effect=ValueError("unexpected remote processing failure"),
+            ),
+        ):
+            result, session = stig.attempt_target(
+                {"host": "cluster.example.test"},
+                "cluster",
+                "cluster",
+                ["cvm", "ahv"],
+                {},
+                False,
+                "unexpected-execution",
+                logger,
+                stig.Console(quiet=True),
+                None,
+            )
+
+        self.assertIs(session, fake_session)
+        self.assertEqual(result["status"], "execution_failed")
+        self.assertEqual(result["phase"], "execution")
+        self.assertEqual(
+            result["error"],
+            "ValueError: unexpected remote processing failure",
+        )
+        self.assertTrue(os.path.isfile(result["csv_log"]))
+
+    def test_apply_connection_failure_still_stops_remaining_target(self):
+        pc_state = MockState()
+        pc_server = MockSSHListener(pc_state).start()
+        closed_cluster_port = self._unused_local_port()
+        try:
+            config = self._write_config(pc_server)
+            self._configure_targets(
+                config,
+                ["cvm", "pcvm"],
+                cluster_port=closed_cluster_port,
+                pc_port=pc_server.port,
+            )
+            rc = stig.main([
+                "--config",
+                config,
+                "--apply",
+                "--non-interactive",
+                "--approval-id",
+                "CHG-APPLY-STOP-001",
+                "--quiet",
+            ])
+        finally:
+            pc_server.close()
+
+        self.assertEqual(rc, 3)
+        self.assertEqual(pc_state.commands, [])
+        targets = self._load_only_report()["results"]["targets"]
+        self.assertEqual(targets[0]["status"], "connection_failed")
+        self.assertEqual(targets[1]["status"], "not_attempted")
+        self.assertIn("No PCVM connection", targets[1]["error"])
 
     def test_real_ssh_apply_requires_approval_and_verifies_readback(self):
         state = MockState()

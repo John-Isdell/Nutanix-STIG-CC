@@ -386,11 +386,42 @@ async function activateConfig() {
 function totalsFromReport(report) {
   const totals = { planned: 0, applied: 0, verified: 0, failed: 0, skipped: 0 };
   (report.targets || []).forEach((target) => {
-    Object.values(target.scopes || {}).forEach((scope) => {
+    const scopes = Object.values(target.scopes || {});
+    scopes.forEach((scope) => {
       Object.keys(totals).forEach((key) => totals[key] += Number(scope[key] || 0));
     });
+    if (!scopes.length) totals.failed += Number(target.failures || 0);
   });
   return totals;
+}
+
+function targetStatusesFromReport(report) {
+  const labels = { cluster: "Cluster", prism_central: "Prism Central" };
+  const statuses = {
+    complete: "complete",
+    completed_with_findings: "completed with findings",
+    connection_failed: "connection failed",
+    execution_failed: "remote execution failed",
+    not_attempted: "not attempted"
+  };
+  return (report.targets || []).map((target) => {
+    let status = target.status;
+    if (!status) {
+      status = target.error
+        ? `${target.phase || "target"}_failed`
+        : target.preflight === "PASS" ? "complete" : "completed_with_findings";
+    }
+    return {
+      label: labels[target.type] || target.type || "Target",
+      host: target.host || "unknown host",
+      status,
+      statusText: statuses[status] || status.replaceAll("_", " "),
+      detail: target.error || (target.findings || [])[0] || "",
+      reportPath: target.report_path || "",
+      jsonReportPath: target.json_report_path || "",
+      csvLog: target.csv_log || ""
+    };
+  });
 }
 
 function renderJob(job) {
@@ -420,6 +451,36 @@ function renderJob(job) {
     error.textContent = report.fatal_error || job.failure;
     error.className = "field-note";
     result.appendChild(error);
+  }
+  const targetStatuses = targetStatusesFromReport(report);
+  if (targetStatuses.length) {
+    const targetList = document.createElement("div");
+    targetList.className = "target-status-list";
+    targetStatuses.forEach((target) => {
+      const item = document.createElement("div");
+      item.className = `target-status ${target.status === "complete" ? "ok" : "attention"}`;
+      const title = document.createElement("b");
+      title.textContent = `${target.label}: ${target.statusText}`;
+      const host = document.createElement("span");
+      host.textContent = target.host;
+      item.append(title, host);
+      if (target.detail) {
+        const detail = document.createElement("p");
+        detail.textContent = target.detail;
+        item.appendChild(detail);
+      }
+      if (target.reportPath || target.jsonReportPath || target.csvLog) {
+        const evidence = document.createElement("small");
+        evidence.textContent = [
+          target.reportPath ? `Text report: ${target.reportPath}` : "",
+          target.jsonReportPath ? `JSON report: ${target.jsonReportPath}` : "",
+          target.csvLog ? `CSV: ${target.csvLog}` : ""
+        ].filter(Boolean).join(" · ");
+        item.appendChild(evidence);
+      }
+      targetList.appendChild(item);
+    });
+    result.appendChild(targetList);
   }
   const metrics = document.createElement("div");
   metrics.className = "metric-grid";

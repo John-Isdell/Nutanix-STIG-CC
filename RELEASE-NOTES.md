@@ -29,6 +29,11 @@ Release date: July 24, 2026
 - Moved DoDIN additional account-lock behavior and fapolicy to explicit manual
   controls, and documented security Lock Status, SSH restrictions, banner
   content, and the AOS 7.5/AHV 11.0 STIG boundary.
+- Made cluster and PCVM dry-run attempts independent so a target-local
+  connection or execution failure is reported without suppressing a reachable
+  target.
+- Added per-target completion/failure cards and exact text, JSON, and CSV
+  evidence references while retaining fail-stop Apply behavior.
 
 ## Portability boundary
 

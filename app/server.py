@@ -725,11 +725,18 @@ def summarized_report(report: dict[str, Any] | None) -> dict[str, Any]:
             {
                 "host": target.get("host"),
                 "type": target.get("type"),
+                "status": target.get("status"),
+                "phase": target.get("phase"),
                 "preflight": target.get("preflight"),
                 "findings": target.get("findings") or [],
+                "error": target.get("error"),
+                "failures": target.get("failures", 0),
                 "scopes": target.get("scopes") or {},
                 "lockdown_ready": target.get("lockdown_ready"),
                 "syslog_failures": target.get("syslog_failures"),
+                "report_path": target.get("report_path"),
+                "json_report_path": target.get("json_report_path"),
+                "csv_log": target.get("csv_log"),
             }
         )
     return {
@@ -1186,6 +1193,7 @@ def capabilities(request: Request) -> dict[str, Any]:
             "Preflight health, DNS, NTP, version, and cluster-state checks",
             "Runtime discovery of security parameters supported by the installed release",
             "CVM, AHV, and PCVM security-parameter planning and verified readback",
+            "Independent cluster/PCVM dry-run attempts with per-target failure evidence",
             "Optional remote syslog configuration through the verified engine",
             "Rollback manifests for values changed by the tool",
             "Text, JSON, CSV, console, baseline, post-change, and evidence reports",
