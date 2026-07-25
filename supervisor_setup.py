@@ -268,6 +268,10 @@ def _systemd_quote(value: str | Path) -> str:
     return f'"{text}"'
 
 
+def _systemd_path(value: str | Path) -> str:
+    return str(value).replace("\\", "\\\\").replace("%", "%%")
+
+
 def linux_systemd_unit(
     root: Path,
     python_executable: str | Path,
@@ -287,7 +291,7 @@ def linux_systemd_unit(
             "[Service]",
             "Type=simple",
             f"ExecStart={command}",
-            f"WorkingDirectory={_systemd_quote(root)}",
+            f"WorkingDirectory={_systemd_path(root)}",
             "Restart=on-failure",
             "RestartSec=3",
             "NoNewPrivileges=true",

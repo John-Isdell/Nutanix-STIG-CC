@@ -2,6 +2,8 @@
 
 Release date: July 24, 2026
 
+- Fixed Linux automatic-start registration by writing `WorkingDirectory=` as
+  an absolute systemd path instead of a quoted command argument.
 - Replaced Windows Scheduled Task registration with a per-user Startup-folder
   shortcut. Windows install and uninstall now run without administrator or UAC
   approval.

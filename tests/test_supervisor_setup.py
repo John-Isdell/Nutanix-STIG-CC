@@ -177,7 +177,9 @@ class SupervisorRegistrationArtifactTests(unittest.TestCase):
         self.assertIn("Restart=on-failure", unit)
         self.assertIn("NoNewPrivileges=true", unit)
         self.assertIn("supervisor.py", unit)
-        self.assertIn("WorkingDirectory=", unit)
+        systemd_root = supervisor_setup._systemd_path(self.root)
+        self.assertIn(f"WorkingDirectory={systemd_root}", unit)
+        self.assertNotIn(f'WorkingDirectory="{systemd_root}"', unit)
 
     def test_distribution_has_exactly_one_installer_per_os(self):
         expected = {
