@@ -69,7 +69,7 @@ jobs:
           python-version: "3.12"
 
       - name: Build and verify release archives
-        run: python scripts/build_release.py --version 1.2.0 --output dist
+        run: python scripts/build_release.py --version 1.3.0 --output dist
 
       - name: Test release inventory
         run: python -m unittest tests.test_release_packaging -v

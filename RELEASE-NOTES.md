@@ -1,5 +1,16 @@
-# Unreleased
+# Nutanix STIG Control Center 1.3.0 — Corporate Windows Compatibility
 
+Release date: July 24, 2026
+
+- Replaced Windows Scheduled Task registration with a per-user Startup-folder
+  shortcut. Windows install and uninstall now run without administrator or UAC
+  approval.
+- Root cause evidence from the captured `.runtime/supervisor.log` was
+  `ERROR: The system cannot find the file specified.` while removing the
+  Windows supervisor registration; `.runtime/supervisor-registration.json`
+  was absent, so the Scheduled Task path had not left a durable registration
+  record. Removing the Task Scheduler dependency avoids this failure mode on
+  locked-down Windows workstations.
 - Added the trademark and non-affiliation notice to user-facing documentation.
 - Replaced the capped, rewriteable 500-entry audit array with append-only,
   daily/monthly rotated JSON Lines and configurable 365-to-7,300-day retention.

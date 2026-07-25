@@ -36,7 +36,7 @@ ruff check --no-cache .
 yamllint .github
 python -m unittest discover -s tests -v
 node --test tests/test_fingerprint_ui.js
-python scripts/build_release.py --version 1.2.0 --output dist
+python scripts/build_release.py --version 1.3.0 --output dist
 ```
 
 The test suite uses mocks and local test servers. Do not point automated tests

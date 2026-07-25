@@ -21,7 +21,7 @@ class ReleasePackagingTests(unittest.TestCase):
     def setUp(self):
         self.temp = tempfile.TemporaryDirectory()
         self.output = Path(self.temp.name)
-        self.artifacts = release_builder.build_release("1.2.0", self.output)
+        self.artifacts = release_builder.build_release("1.3.0", self.output)
 
     def tearDown(self):
         self.temp.cleanup()
@@ -48,9 +48,9 @@ class ReleasePackagingTests(unittest.TestCase):
         self.assertEqual(
             {path.name for path in self.artifacts},
             {
-                "Nutanix-STIG-Control-Center-1.2.0-windows.zip",
-                "Nutanix-STIG-Control-Center-1.2.0-macos.zip",
-                "Nutanix-STIG-Control-Center-1.2.0-linux.tar.gz",
+                "Nutanix-STIG-Control-Center-1.3.0-windows.zip",
+                "Nutanix-STIG-Control-Center-1.3.0-macos.zip",
+                "Nutanix-STIG-Control-Center-1.3.0-linux.tar.gz",
                 "SHA256SUMS.txt",
             },
         )
@@ -64,7 +64,7 @@ class ReleasePackagingTests(unittest.TestCase):
             self.assertEqual(actual, expected)
 
     def test_each_archive_has_only_its_platform_installer(self):
-        prefix = "Nutanix-STIG-Control-Center-1.2.0/"
+        prefix = "Nutanix-STIG-Control-Center-1.3.0/"
         installers = {
             "windows": "Install-Control-Center.cmd",
             "macos": "Install-Control-Center.command",
@@ -89,7 +89,7 @@ class ReleasePackagingTests(unittest.TestCase):
             self.assertNotIn(prefix + "requirements-dev.txt", names)
 
     def test_platform_installer_modes_and_windows_line_endings(self):
-        prefix = "Nutanix-STIG-Control-Center-1.2.0/"
+        prefix = "Nutanix-STIG-Control-Center-1.3.0/"
         cases = (
             ("windows", "Install-Control-Center.cmd", 0o644),
             ("macos", "Install-Control-Center.command", 0o755),
@@ -109,7 +109,7 @@ class ReleasePackagingTests(unittest.TestCase):
                 self.assertNotIn(b"\n", data.replace(b"\r\n", b""))
 
     def test_each_archive_contains_a_runnable_controller_layout(self):
-        prefix = "Nutanix-STIG-Control-Center-1.2.0"
+        prefix = "Nutanix-STIG-Control-Center-1.3.0"
         for archive_path in self.artifacts:
             if archive_path.name == "SHA256SUMS.txt":
                 continue
@@ -138,17 +138,17 @@ class ReleasePackagingTests(unittest.TestCase):
             release_builder.build_release("9.9.9", self.output)
 
     def test_application_and_controller_versions_match(self):
-        self.assertEqual(release_builder.source_version(), "1.2.0")
-        self.assertEqual(release_builder.application_versions(), {"1.2.0"})
+        self.assertEqual(release_builder.source_version(), "1.3.0")
+        self.assertEqual(release_builder.application_versions(), {"1.3.0"})
 
     def test_unexpected_output_file_fails_closed(self):
         (self.output / "unexpected.txt").write_text("not a release artifact")
         with self.assertRaises(release_builder.ReleaseBuildError):
-            release_builder.build_release("1.2.0", self.output)
+            release_builder.build_release("1.3.0", self.output)
 
     def test_repeated_builds_are_byte_for_byte_reproducible(self):
         second_output = self.output / "second"
-        second_artifacts = release_builder.build_release("1.2.0", second_output)
+        second_artifacts = release_builder.build_release("1.3.0", second_output)
         first_by_name = {path.name: path for path in self.artifacts}
         second_by_name = {path.name: path for path in second_artifacts}
         self.assertEqual(first_by_name.keys(), second_by_name.keys())

@@ -24,7 +24,7 @@ from urllib.request import Request, urlopen
 
 import supervisor_setup
 
-VERSION = "1.2.0"
+VERSION = "1.3.0"
 ROOT = Path(__file__).resolve().parent
 APP_DIR = ROOT / "app"
 RUNTIME_DIR = ROOT / ".runtime"
