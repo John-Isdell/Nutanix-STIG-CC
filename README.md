@@ -1,5 +1,10 @@
 # Nutanix STIG Control Center — Universal Edition
 
+> **Unofficial, community project — not affiliated with or endorsed by
+> Nutanix, Inc.** "Nutanix," "AHV," and "Prism Central" are trademarks of
+> Nutanix, Inc., used here descriptively only. See [NOTICE.md](NOTICE.md) for
+> the full notice.
+
 Version 1.2.0
 
 This distribution runs directly on Windows, macOS, or Linux without Node.js, a

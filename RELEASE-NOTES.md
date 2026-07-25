@@ -1,5 +1,6 @@
 # Unreleased
 
+- Added the trademark and non-affiliation notice to user-facing documentation.
 - Replaced the capped, rewriteable 500-entry audit array with append-only,
   daily/monthly rotated JSON Lines and configurable 365-to-7,300-day retention.
 - Added per-entry sequence numbers, previous-entry and entry SHA-256 hashes,
