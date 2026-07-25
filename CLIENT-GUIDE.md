@@ -179,6 +179,24 @@ Only one cluster may be active. Non-secret settings are saved in `app/data`.
 Dry assessment does not send security edit commands. Apply remains locked
 unless a full-health dry run succeeds with a change-capable profile.
 
+Cluster and PCVM connection attempts are independent during a dry assessment.
+If one target is unreachable, rejects authentication, or raises an unexpected
+target-local error, the other target is still attempted. The operation
+finishes with issues and shows a separate status for each target. The failed
+target entry preserves the specific SSH error and points to:
+
+- `reports/stig_report_<run_id>.txt`
+- `reports/stig_report_<run_id>.json`
+- `logs/stig_run_<run_id>.csv`
+
+These files are inside that operation's local evidence folder and are also
+included in the downloadable evidence ZIP. A partial dry assessment never
+unlocks Apply.
+
+Apply remains conservative: a connection or remote-execution exception stops
+later targets and records them as not attempted. Changing Apply to skip a
+failed target requires a separate client-approved safety decision.
+
 Changing the target, profile, scope, health, syslog, or verification
 configuration invalidates the gate and requires a new dry run.
 
@@ -269,6 +287,7 @@ Supervisor state and registration records are:
 - Local CVM/PCVM connection and strict host-key trust.
 - Preflight health, DNS, NTP, version, and cluster-state checks.
 - Runtime discovery of release-supported security parameters.
+- Independent per-target dry-run connection and failure reporting.
 - CVM, AHV, and PCVM change planning.
 - Approval-gated supported security writes.
 - Optional supported syslog configuration.

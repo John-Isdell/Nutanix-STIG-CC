@@ -1307,6 +1307,14 @@ def evaluate_lockdown_readiness(session, console):
 # Reporting
 # ---------------------------------------------------------------------------
 
+def run_report_paths(run_id):
+    """Return the stable text and JSON report paths for a run."""
+    return (
+        os.path.join(REPORT_DIR, "stig_report_%s.txt" % run_id),
+        os.path.join(REPORT_DIR, "stig_report_%s.json" % run_id),
+    )
+
+
 def build_summary(run_id, profile, apply_changes, results, logger):
     """Assemble the plain text run summary used for console and email output."""
     lines = []
@@ -1333,7 +1341,11 @@ def build_summary(run_id, profile, apply_changes, results, logger):
     for target in results.get("targets", []):
         lines.append("-" * 60)
         lines.append("Target       : %s (%s)" % (target["host"], target["type"]))
-        lines.append("Preflight    : %s" % target["preflight"])
+        lines.append("Status       : %s" % target.get("status", "unknown"))
+        lines.append("Phase        : %s" % target.get("phase", "complete"))
+        lines.append("Preflight    : %s" % target.get("preflight", "NOT_RUN"))
+        if target.get("error"):
+            lines.append("Error        : %s" % target["error"])
         if target.get("findings"):
             for finding in target["findings"]:
                 lines.append("  finding    : %s" % finding)
@@ -1359,6 +1371,12 @@ def build_summary(run_id, profile, apply_changes, results, logger):
                             else "%d failure(s)" % target["syslog_failures"]))
         if target.get("lockdown_ready") is not None:
             lines.append("Phase 4 ready: %s" % ("yes" if target["lockdown_ready"] else "no"))
+        if target.get("report_path"):
+            lines.append("Text report  : %s" % target["report_path"])
+        if target.get("json_report_path"):
+            lines.append("JSON report  : %s" % target["json_report_path"])
+        if target.get("csv_log"):
+            lines.append("CSV log      : %s" % target["csv_log"])
         lines.append("")
 
     tally = logger.counts()
@@ -1381,8 +1399,7 @@ def build_summary(run_id, profile, apply_changes, results, logger):
 def write_reports(run_id, profile, apply_changes, results, logger, summary):
     """Write stable text and JSON reports for the evidence package."""
     _ensure_dir(REPORT_DIR)
-    text_path = os.path.join(REPORT_DIR, "stig_report_%s.txt" % run_id)
-    json_path = os.path.join(REPORT_DIR, "stig_report_%s.json" % run_id)
+    text_path, json_path = run_report_paths(run_id)
     with open(text_path, "w", encoding="utf-8") as handle:
         handle.write(summary)
         handle.write("\n")
@@ -1907,10 +1924,194 @@ def open_session(cfg, options, console, label):
         command_timeout=options["command_timeout"],
         console=console,
     )
-    session.connect()
+    try:
+        session.connect()
+    except Exception:
+        session.close()
+        raise
     console.ok("Connected to %s (%s auth)"
                % (cfg["host"], "key" if session.used_key_auth else "password"))
     return session
+
+
+def failed_target_result(
+    cfg, target_type, scopes, phase, message, run_id, logger, console
+):
+    """Record a target-local failure with stable evidence references."""
+    text_report, json_report = run_report_paths(run_id)
+    host = cfg.get("host") or "not configured"
+    status = "%s_failed" % phase
+    logger.record(
+        host,
+        target_type,
+        ",".join(scopes) or "-",
+        phase,
+        "-",
+        "",
+        "",
+        "check",
+        "FAILED",
+        message,
+    )
+    console.error(
+        "%s %s on %s: %s. See %s and %s. Full CSV log: %s"
+        % (
+            target_type.replace("_", " ").title(),
+            status.replace("_", " "),
+            host,
+            message,
+            text_report,
+            json_report,
+            logger.path,
+        )
+    )
+    return {
+        "host": host,
+        "type": target_type,
+        "status": status,
+        "phase": phase,
+        "preflight": "NOT_RUN" if phase == "connection" else "INCOMPLETE",
+        "findings": [message],
+        "error": message,
+        "scopes": {},
+        "failures": 1,
+        "report_path": text_report,
+        "json_report_path": json_report,
+        "csv_log": logger.path,
+    }
+
+
+def blocked_target_result(
+    cfg, target_type, scopes, reason, run_id, logger, console
+):
+    """Record an Apply target that was not attempted after an earlier failure."""
+    text_report, json_report = run_report_paths(run_id)
+    host = cfg.get("host") or "not configured"
+    logger.record(
+        host,
+        target_type,
+        ",".join(scopes) or "-",
+        "blocked",
+        "-",
+        "",
+        "",
+        "skip",
+        "SKIPPED",
+        reason,
+    )
+    console.warn("%s was not attempted: %s" % (host, reason))
+    return {
+        "host": host,
+        "type": target_type,
+        "status": "not_attempted",
+        "phase": "blocked",
+        "preflight": "NOT_RUN",
+        "findings": [reason],
+        "error": reason,
+        "scopes": {},
+        "failures": 0,
+        "report_path": text_report,
+        "json_report_path": json_report,
+        "csv_log": logger.path,
+    }
+
+
+def attempt_target(
+    cfg,
+    label,
+    target_type,
+    scopes,
+    options,
+    apply_changes,
+    run_id,
+    logger,
+    console,
+    syslog_cfg,
+):
+    """Connect and process one target without hiding failures on other targets."""
+    try:
+        session = open_session(cfg, options, console, label)
+    except RuntimeError as exc:
+        return (
+            failed_target_result(
+                cfg,
+                target_type,
+                scopes,
+                "connection",
+                str(exc),
+                run_id,
+                logger,
+                console,
+            ),
+            None,
+        )
+    except Exception as exc:  # noqa: BLE001 - must preserve a complete report
+        return (
+            failed_target_result(
+                cfg,
+                target_type,
+                scopes,
+                "connection",
+                "%s: %s" % (type(exc).__name__, exc),
+                run_id,
+                logger,
+                console,
+            ),
+            None,
+        )
+
+    try:
+        result = process_target(
+            session,
+            target_type,
+            scopes,
+            options,
+            apply_changes,
+            run_id,
+            logger,
+            console,
+            syslog_cfg,
+        )
+    except RuntimeError as exc:
+        return (
+            failed_target_result(
+                cfg,
+                target_type,
+                scopes,
+                "execution",
+                str(exc),
+                run_id,
+                logger,
+                console,
+            ),
+            session,
+        )
+    except Exception as exc:  # noqa: BLE001 - must preserve a complete report
+        return (
+            failed_target_result(
+                cfg,
+                target_type,
+                scopes,
+                "execution",
+                "%s: %s" % (type(exc).__name__, exc),
+                run_id,
+                logger,
+                console,
+            ),
+            session,
+        )
+
+    result["phase"] = "complete"
+    result["status"] = (
+        "complete"
+        if (
+            result.get("failures", 0) == 0
+            and result.get("preflight") == "PASS"
+            and not result.get("findings")
+        )
+        else "completed_with_findings"
+    )
+    return result, session
 
 
 # ---------------------------------------------------------------------------
@@ -2064,24 +2265,66 @@ def main(argv=None):
                 "failures": rollback_failures,
             }
         else:
+            stop_remaining_apply_targets = False
             if cluster_scopes:
-                session = open_session(cluster_cfg, options, console, "cluster")
-                sessions.append(session)
-                result = process_target(session, "cluster", cluster_scopes, options,
-                                        apply_changes, run_id, logger, console,
-                                        syslog_cfg)
+                result, session = attempt_target(
+                    cluster_cfg,
+                    "cluster",
+                    "cluster",
+                    cluster_scopes,
+                    options,
+                    apply_changes,
+                    run_id,
+                    logger,
+                    console,
+                    syslog_cfg,
+                )
+                if session:
+                    sessions.append(session)
                 results["targets"].append(result)
                 total_failures += result["failures"]
+                if (
+                    apply_changes
+                    and result["status"] in {"connection_failed", "execution_failed"}
+                ):
+                    connection_error = True
+                    stop_remaining_apply_targets = True
 
             if pc_scopes:
-                session = open_session(pc_cfg, options, console, "prism central")
-                sessions.append(session)
-                # Prism Central has no syslog handling here. Configure it in a
-                # separate run against the PCVM if required by the design.
-                result = process_target(session, "prism_central", pc_scopes, options,
-                                        apply_changes, run_id, logger, console, None)
+                if stop_remaining_apply_targets:
+                    result = blocked_target_result(
+                        pc_cfg,
+                        "prism_central",
+                        pc_scopes,
+                        "Apply stopped after the cluster target failed during "
+                        "connection or remote execution. No PCVM connection or "
+                        "change was attempted.",
+                        run_id,
+                        logger,
+                        console,
+                    )
+                else:
+                    result, session = attempt_target(
+                        pc_cfg,
+                        "prism central",
+                        "prism_central",
+                        pc_scopes,
+                        options,
+                        apply_changes,
+                        run_id,
+                        logger,
+                        console,
+                        None,
+                    )
+                    if session:
+                        sessions.append(session)
                 results["targets"].append(result)
                 total_failures += result["failures"]
+                if (
+                    apply_changes
+                    and result["status"] in {"connection_failed", "execution_failed"}
+                ):
+                    connection_error = True
 
     except RuntimeError as exc:
         console.error(str(exc))

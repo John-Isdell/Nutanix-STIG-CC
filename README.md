@@ -170,7 +170,7 @@ The browser workflow remains:
 4. Select profile, scopes, full NCC, syslog, and verification settings.
 5. Activate one cluster configuration.
 6. Run dry assessment.
-7. Review the plan and evidence.
+7. Review the per-target status, plan, failures, and evidence.
 8. Authorize Apply only after the matching dry run passes.
 9. Download evidence and complete manual controls.
 10. Preview and authorize rollback only when required.
@@ -191,6 +191,13 @@ behavior, fapolicy, SSH restrictions, and security-configuration Lock Status
 remain manual. The guide also records Nutanix's AOS 7.5/AHV 11.0 RHEL 9 STIG
 limitation; this tool cannot turn an unsupported product baseline into a
 compliant one.
+
+During dry assessment, cluster and PCVM targets are attempted independently.
+One connection failure does not hide results from a reachable target. The
+operation completes with issues, records the exact target error and
+text/JSON/CSV evidence paths, and keeps Apply locked. Apply continues to stop
+on a connection or remote-execution exception unless the client separately
+approves a different safety policy.
 
 ## Logs and troubleshooting
 
