@@ -66,6 +66,9 @@ credential storage, or a bypass for approval gates.
 
 Keep each pull request focused on one reviewable task. Include:
 
+- new user-facing documents must include the canonical `NOTICE.md` short form
+  before merge, and contributions must not add copy that could imply Nutanix
+  affiliation, sponsorship, or endorsement;
 - the problem and intended operator impact;
 - security and failure-mode analysis;
 - tests added or updated;

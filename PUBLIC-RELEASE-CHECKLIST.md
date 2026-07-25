@@ -17,8 +17,9 @@ document from the repository and release manifest pending legal review.
 - [ ] The reviewer has confirmed the documents are not verbatim reproductions
   of vendor documentation.
 - [ ] The repository owner has confirmed the project license.
-- [ ] Product names and trademarks are used descriptively and do not imply
-  vendor endorsement.
+- [ ] Confirm `NOTICE.md` exists at the repository root and its short form
+  appears in `README.md`, `CLIENT-GUIDE.md`, and
+  `app/docs/Nutanix_Security_Guide_7.5_Control_Crosswalk.md`.
 - [ ] After completing the bundled-document review, a repository owner has set
   the GitHub Actions repository variable `DOCS_COPYRIGHT_REVIEWED` to the exact
   lowercase value `true`.
